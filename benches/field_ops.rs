@@ -7,11 +7,13 @@ use ark_ff::{AdditiveGroup as ArkAdditiveGroup, Field as ArkField};
 use hachi_pcs::algebra::{Fp128Packing, PackedField, PackedValue, Prime128Offset275};
 use hachi_pcs::{AdditiveGroup as HachiAdditiveGroup, CanonicalField, FieldCore};
 use p3_baby_bear::BabyBear;
-use p3_field::extension::BinomialExtensionField;
+use p3_field::extension::{BinomialExtensionField, QuinticTrinomialExtensionField};
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 
 type BB4 = BinomialExtensionField<BabyBear, 4>;
 type BB5 = BinomialExtensionField<BabyBear, 5>;
+type KB5 = QuinticTrinomialExtensionField<KoalaBear>;
 type PackedFp128 = Fp128Packing<0xfffffffffffffffffffffffffffffeedu128>;
 
 const N: usize = 4096;
@@ -144,6 +146,24 @@ fn make_bb_ext<const D: usize>(n: usize) -> Vec<BinomialExtensionField<BabyBear,
         .collect()
 }
 
+fn make_koalabear(n: usize) -> Vec<KoalaBear> {
+    make_u64s(n)
+        .iter()
+        .map(|&v| KoalaBear::from_u32(v as u32))
+        .collect()
+}
+
+fn make_kb5(n: usize) -> Vec<KB5> {
+    let raw = make_u64s(n * 5);
+    raw.chunks(5)
+        .map(|chunk| {
+            let base: [KoalaBear; 5] =
+                std::array::from_fn(|i| KoalaBear::from_u32(chunk[i] as u32));
+            KB5::new(base)
+        })
+        .collect()
+}
+
 fn make_fp128(n: usize) -> Vec<Prime128Offset275> {
     let raw = make_u64s(n * 2);
     raw.chunks(2)
@@ -209,6 +229,20 @@ fn bench_babybear_ext5(c: &mut Criterion) {
     thr_mul(name, &a, &b, &mut out, c);
 }
 
+fn bench_koalabear_ext5(c: &mut Criterion) {
+    let a = make_kb5(N);
+    let b = make_kb5(N);
+    let mut out = vec![KB5::ZERO; N];
+    let name = "KoalaBear_Ext5";
+
+    lat_add(name, KB5::ZERO, &a, c);
+    lat_sub(name, KB5::ZERO, &a, c);
+    lat_mul(name, KB5::ONE, &a, c);
+    thr_add(name, &a, &b, &mut out, c);
+    thr_sub(name, &a, &b, &mut out, c);
+    thr_mul(name, &a, &b, &mut out, c);
+}
+
 fn bench_fp128(c: &mut Criterion) {
     type F = Prime128Offset275;
     let a = make_fp128(N);
@@ -260,6 +294,7 @@ criterion_group!(
     bench_babybear,
     bench_babybear_ext4,
     bench_babybear_ext5,
+    bench_koalabear_ext5,
     bench_fp128,
     bench_fp128_packed,
     bench_bn254

@@ -7,8 +7,9 @@ edition = "2021"
 criterion = { version = "0.5", features = ["html_reports"] }
 rand = "0.8"
 
-# Plonky3 fields (BabyBear, degree-4 extension)
+# Plonky3 fields
 p3-baby-bear = { path = "../../../SNARKs/plonky3/baby-bear" }
+p3-koala-bear = { path = "../../../SNARKs/plonky3/koala-bear" }
 p3-field = { path = "../../../SNARKs/plonky3/field" }
 
 # 128-bit prime field (p = 2^128 - 275)
