@@ -76,6 +76,7 @@ checksum = "940b3a0ca603d1eade50a4846a2afffd5ef57a9feac2c0e2ec2e14f9ead76000"
 [[package]]
 name = "ark-bn254"
 version = "0.5.0"
+source = "git+https://github.com/quangvdao/arkworks-algebra?rev=8221f4df9673c59b7f1bde82f483d73a36d5b00f#8221f4df9673c59b7f1bde82f483d73a36d5b00f"
 dependencies = [
  "ark-ec",
  "ark-ff",
@@ -86,6 +87,7 @@ dependencies = [
 [[package]]
 name = "ark-ec"
 version = "0.5.0"
+source = "git+https://github.com/quangvdao/arkworks-algebra?rev=8221f4df9673c59b7f1bde82f483d73a36d5b00f#8221f4df9673c59b7f1bde82f483d73a36d5b00f"
 dependencies = [
  "ahash",
  "ark-ff",
@@ -105,6 +107,7 @@ dependencies = [
 [[package]]
 name = "ark-ff"
 version = "0.5.0"
+source = "git+https://github.com/quangvdao/arkworks-algebra?rev=8221f4df9673c59b7f1bde82f483d73a36d5b00f#8221f4df9673c59b7f1bde82f483d73a36d5b00f"
 dependencies = [
  "allocative",
  "ark-ff-asm",
@@ -124,6 +127,7 @@ dependencies = [
 [[package]]
 name = "ark-ff-asm"
 version = "0.5.0"
+source = "git+https://github.com/quangvdao/arkworks-algebra?rev=8221f4df9673c59b7f1bde82f483d73a36d5b00f#8221f4df9673c59b7f1bde82f483d73a36d5b00f"
 dependencies = [
  "quote",
  "syn 2.0.117",
@@ -132,6 +136,7 @@ dependencies = [
 [[package]]
 name = "ark-ff-macros"
 version = "0.5.0"
+source = "git+https://github.com/quangvdao/arkworks-algebra?rev=8221f4df9673c59b7f1bde82f483d73a36d5b00f#8221f4df9673c59b7f1bde82f483d73a36d5b00f"
 dependencies = [
  "num-bigint",
  "num-traits",
@@ -143,6 +148,7 @@ dependencies = [
 [[package]]
 name = "ark-poly"
 version = "0.5.0"
+source = "git+https://github.com/quangvdao/arkworks-algebra?rev=8221f4df9673c59b7f1bde82f483d73a36d5b00f#8221f4df9673c59b7f1bde82f483d73a36d5b00f"
 dependencies = [
  "ahash",
  "ark-ff",
@@ -156,6 +162,7 @@ dependencies = [
 [[package]]
 name = "ark-serialize"
 version = "0.5.0"
+source = "git+https://github.com/quangvdao/arkworks-algebra?rev=8221f4df9673c59b7f1bde82f483d73a36d5b00f#8221f4df9673c59b7f1bde82f483d73a36d5b00f"
 dependencies = [
  "ark-serialize-derive",
  "ark-std",
@@ -167,6 +174,7 @@ dependencies = [
 [[package]]
 name = "ark-serialize-derive"
 version = "0.5.0"
+source = "git+https://github.com/quangvdao/arkworks-algebra?rev=8221f4df9673c59b7f1bde82f483d73a36d5b00f#8221f4df9673c59b7f1bde82f483d73a36d5b00f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -477,6 +485,7 @@ dependencies = [
 [[package]]
 name = "hachi-derive"
 version = "0.1.0"
+source = "git+https://github.com/a16z/hachi?rev=9c8bbafb79392bfde4b30763db0b326d936eeb38#9c8bbafb79392bfde4b30763db0b326d936eeb38"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -486,6 +495,7 @@ dependencies = [
 [[package]]
 name = "hachi-pcs"
 version = "0.1.0"
+source = "git+https://github.com/a16z/hachi?rev=9c8bbafb79392bfde4b30763db0b326d936eeb38#9c8bbafb79392bfde4b30763db0b326d936eeb38"
 dependencies = [
  "aes",
  "blake2",
@@ -673,6 +683,7 @@ checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 [[package]]
 name = "p3-baby-bear"
 version = "0.5.1"
+source = "git+https://github.com/Plonky3/Plonky3.git?rev=b482e1be5f6d2e0917c5ecea3009335bbfd94e42#b482e1be5f6d2e0917c5ecea3009335bbfd94e42"
 dependencies = [
  "p3-challenger",
  "p3-field",
@@ -687,6 +698,7 @@ dependencies = [
 [[package]]
 name = "p3-challenger"
 version = "0.5.1"
+source = "git+https://github.com/Plonky3/Plonky3.git?rev=b482e1be5f6d2e0917c5ecea3009335bbfd94e42#b482e1be5f6d2e0917c5ecea3009335bbfd94e42"
 dependencies = [
  "p3-field",
  "p3-maybe-rayon",
@@ -699,6 +711,7 @@ dependencies = [
 [[package]]
 name = "p3-dft"
 version = "0.5.1"
+source = "git+https://github.com/Plonky3/Plonky3.git?rev=b482e1be5f6d2e0917c5ecea3009335bbfd94e42#b482e1be5f6d2e0917c5ecea3009335bbfd94e42"
 dependencies = [
  "itertools 0.14.0",
  "p3-field",
@@ -712,6 +725,7 @@ dependencies = [
 [[package]]
 name = "p3-field"
 version = "0.5.1"
+source = "git+https://github.com/Plonky3/Plonky3.git?rev=b482e1be5f6d2e0917c5ecea3009335bbfd94e42#b482e1be5f6d2e0917c5ecea3009335bbfd94e42"
 dependencies = [
  "itertools 0.14.0",
  "num-bigint",
@@ -726,6 +740,7 @@ dependencies = [
 [[package]]
 name = "p3-koala-bear"
 version = "0.5.1"
+source = "git+https://github.com/Plonky3/Plonky3.git?rev=b482e1be5f6d2e0917c5ecea3009335bbfd94e42#b482e1be5f6d2e0917c5ecea3009335bbfd94e42"
 dependencies = [
  "p3-challenger",
  "p3-field",
@@ -740,6 +755,7 @@ dependencies = [
 [[package]]
 name = "p3-matrix"
 version = "0.5.1"
+source = "git+https://github.com/Plonky3/Plonky3.git?rev=b482e1be5f6d2e0917c5ecea3009335bbfd94e42#b482e1be5f6d2e0917c5ecea3009335bbfd94e42"
 dependencies = [
  "itertools 0.14.0",
  "p3-field",
@@ -753,10 +769,12 @@ dependencies = [
 [[package]]
 name = "p3-maybe-rayon"
 version = "0.5.1"
+source = "git+https://github.com/Plonky3/Plonky3.git?rev=b482e1be5f6d2e0917c5ecea3009335bbfd94e42#b482e1be5f6d2e0917c5ecea3009335bbfd94e42"
 
 [[package]]
 name = "p3-mds"
 version = "0.5.1"
+source = "git+https://github.com/Plonky3/Plonky3.git?rev=b482e1be5f6d2e0917c5ecea3009335bbfd94e42#b482e1be5f6d2e0917c5ecea3009335bbfd94e42"
 dependencies = [
  "p3-dft",
  "p3-field",
@@ -768,6 +786,7 @@ dependencies = [
 [[package]]
 name = "p3-monty-31"
 version = "0.5.1"
+source = "git+https://github.com/Plonky3/Plonky3.git?rev=b482e1be5f6d2e0917c5ecea3009335bbfd94e42#b482e1be5f6d2e0917c5ecea3009335bbfd94e42"
 dependencies = [
  "itertools 0.14.0",
  "num-bigint",
@@ -790,6 +809,7 @@ dependencies = [
 [[package]]
 name = "p3-poseidon1"
 version = "0.5.1"
+source = "git+https://github.com/Plonky3/Plonky3.git?rev=b482e1be5f6d2e0917c5ecea3009335bbfd94e42#b482e1be5f6d2e0917c5ecea3009335bbfd94e42"
 dependencies = [
  "p3-field",
  "p3-symmetric",
@@ -799,6 +819,7 @@ dependencies = [
 [[package]]
 name = "p3-poseidon2"
 version = "0.5.1"
+source = "git+https://github.com/Plonky3/Plonky3.git?rev=b482e1be5f6d2e0917c5ecea3009335bbfd94e42#b482e1be5f6d2e0917c5ecea3009335bbfd94e42"
 dependencies = [
  "p3-field",
  "p3-mds",
@@ -810,6 +831,7 @@ dependencies = [
 [[package]]
 name = "p3-symmetric"
 version = "0.5.1"
+source = "git+https://github.com/Plonky3/Plonky3.git?rev=b482e1be5f6d2e0917c5ecea3009335bbfd94e42#b482e1be5f6d2e0917c5ecea3009335bbfd94e42"
 dependencies = [
  "itertools 0.14.0",
  "p3-field",
@@ -820,6 +842,7 @@ dependencies = [
 [[package]]
 name = "p3-util"
 version = "0.5.1"
+source = "git+https://github.com/Plonky3/Plonky3.git?rev=b482e1be5f6d2e0917c5ecea3009335bbfd94e42#b482e1be5f6d2e0917c5ecea3009335bbfd94e42"
 dependencies = [
  "serde",
  "transpose",
