@@ -71,57 +71,51 @@ fn lat_mul<F: Copy + MulAssign>(name: &str, one: F, elems: &[F], c: &mut Criteri
 }
 
 // ---------------------------------------------------------------------------
-// Throughput: independent pairwise ops  out[i] = a[i] OP b[i]
-// No serial dependency between iterations, only the target operation.
+// Throughput: in-register batch of BATCH independent ops per pass.
+// Uses stride BATCH/2 so the compiler can pipeline without serial deps.
 // ---------------------------------------------------------------------------
 
-fn thr_add<F: Copy + Add<Output = F>>(
-    name: &str,
-    a: &[F],
-    b: &[F],
-    out: &mut [F],
-    c: &mut Criterion,
-) {
-    c.bench_function(&format!("{name}/thr_add"), |bench| {
-        bench.iter(|| {
-            for i in 0..a.len() {
-                out[i] = a[i] + b[i];
+const BATCH: usize = 16;
+const PASSES: usize = 64;
+
+fn thr_add<F: Copy + Add<Output = F>>(name: &str, seed: &[F], c: &mut Criterion) {
+    let mut batch: [F; BATCH] = std::array::from_fn(|i| seed[i % seed.len()]);
+    c.bench_function(&format!("{name}/thr_add"), |b| {
+        b.iter(|| {
+            for _ in 0..PASSES {
+                for i in 0..BATCH {
+                    batch[i] = batch[i] + batch[(i + BATCH / 2) % BATCH];
+                }
             }
-            black_box(&*out);
+            black_box(batch)
         })
     });
 }
 
-fn thr_sub<F: Copy + Sub<Output = F>>(
-    name: &str,
-    a: &[F],
-    b: &[F],
-    out: &mut [F],
-    c: &mut Criterion,
-) {
-    c.bench_function(&format!("{name}/thr_sub"), |bench| {
-        bench.iter(|| {
-            for i in 0..a.len() {
-                out[i] = a[i] - b[i];
+fn thr_sub<F: Copy + Sub<Output = F>>(name: &str, seed: &[F], c: &mut Criterion) {
+    let mut batch: [F; BATCH] = std::array::from_fn(|i| seed[i % seed.len()]);
+    c.bench_function(&format!("{name}/thr_sub"), |b| {
+        b.iter(|| {
+            for _ in 0..PASSES {
+                for i in 0..BATCH {
+                    batch[i] = batch[i] - batch[(i + BATCH / 2) % BATCH];
+                }
             }
-            black_box(&*out);
+            black_box(batch)
         })
     });
 }
 
-fn thr_mul<F: Copy + Mul<Output = F>>(
-    name: &str,
-    a: &[F],
-    b: &[F],
-    out: &mut [F],
-    c: &mut Criterion,
-) {
-    c.bench_function(&format!("{name}/thr_mul"), |bench| {
-        bench.iter(|| {
-            for i in 0..a.len() {
-                out[i] = a[i] * b[i];
+fn thr_mul<F: Copy + Mul<Output = F>>(name: &str, seed: &[F], c: &mut Criterion) {
+    let mut batch: [F; BATCH] = std::array::from_fn(|i| seed[i % seed.len()]);
+    c.bench_function(&format!("{name}/thr_mul"), |b| {
+        b.iter(|| {
+            for _ in 0..PASSES {
+                for i in 0..BATCH {
+                    batch[i] = batch[i] * batch[(i + BATCH / 2) % BATCH];
+                }
             }
-            black_box(&*out);
+            black_box(batch)
         })
     });
 }
@@ -201,118 +195,102 @@ fn make_gf128(n: usize) -> Vec<GF128> {
 
 fn bench_babybear(c: &mut Criterion) {
     let a = make_babybear(N);
-    let b = make_babybear(N);
-    let mut out = vec![BabyBear::ZERO; N];
     let name = "BabyBear";
 
     lat_add(name, BabyBear::ZERO, &a, c);
     lat_sub(name, BabyBear::ZERO, &a, c);
     lat_mul(name, BabyBear::ONE, &a, c);
-    thr_add(name, &a, &b, &mut out, c);
-    thr_sub(name, &a, &b, &mut out, c);
-    thr_mul(name, &a, &b, &mut out, c);
+    thr_add(name, &a, c);
+    thr_sub(name, &a, c);
+    thr_mul(name, &a, c);
 }
 
 fn bench_babybear_ext4(c: &mut Criterion) {
     let a = make_bb_ext::<4>(N);
-    let b = make_bb_ext::<4>(N);
-    let mut out = vec![BB4::ZERO; N];
     let name = "BabyBear_Ext4";
 
     lat_add(name, BB4::ZERO, &a, c);
     lat_sub(name, BB4::ZERO, &a, c);
     lat_mul(name, BB4::ONE, &a, c);
-    thr_add(name, &a, &b, &mut out, c);
-    thr_sub(name, &a, &b, &mut out, c);
-    thr_mul(name, &a, &b, &mut out, c);
+    thr_add(name, &a, c);
+    thr_sub(name, &a, c);
+    thr_mul(name, &a, c);
 }
 
 fn bench_babybear_ext5(c: &mut Criterion) {
     let a = make_bb_ext::<5>(N);
-    let b = make_bb_ext::<5>(N);
-    let mut out = vec![BB5::ZERO; N];
     let name = "BabyBear_Ext5";
 
     lat_add(name, BB5::ZERO, &a, c);
     lat_sub(name, BB5::ZERO, &a, c);
     lat_mul(name, BB5::ONE, &a, c);
-    thr_add(name, &a, &b, &mut out, c);
-    thr_sub(name, &a, &b, &mut out, c);
-    thr_mul(name, &a, &b, &mut out, c);
+    thr_add(name, &a, c);
+    thr_sub(name, &a, c);
+    thr_mul(name, &a, c);
 }
 
 fn bench_koalabear_ext5(c: &mut Criterion) {
     let a = make_kb5(N);
-    let b = make_kb5(N);
-    let mut out = vec![KB5::ZERO; N];
     let name = "KoalaBear_Ext5";
 
     lat_add(name, KB5::ZERO, &a, c);
     lat_sub(name, KB5::ZERO, &a, c);
     lat_mul(name, KB5::ONE, &a, c);
-    thr_add(name, &a, &b, &mut out, c);
-    thr_sub(name, &a, &b, &mut out, c);
-    thr_mul(name, &a, &b, &mut out, c);
+    thr_add(name, &a, c);
+    thr_sub(name, &a, c);
+    thr_mul(name, &a, c);
 }
 
 fn bench_fp128(c: &mut Criterion) {
     type F = Prime128Offset275;
     let a = make_fp128(N);
-    let b = make_fp128(N);
-    let mut out = vec![F::ZERO; N];
     let name = "Fp128";
 
     lat_add(name, F::ZERO, &a, c);
     lat_sub(name, F::ZERO, &a, c);
     lat_mul(name, F::one(), &a, c);
-    thr_add(name, &a, &b, &mut out, c);
-    thr_sub(name, &a, &b, &mut out, c);
-    thr_mul(name, &a, &b, &mut out, c);
+    thr_add(name, &a, c);
+    thr_sub(name, &a, c);
+    thr_mul(name, &a, c);
 }
 
 fn bench_fp128_packed(c: &mut Criterion) {
     let a = make_fp128_packed(N);
-    let b = make_fp128_packed(N);
     let zero = PackedFp128::broadcast(Prime128Offset275::ZERO);
     let one = PackedFp128::broadcast(Prime128Offset275::one());
-    let mut out = vec![zero; a.len()];
     let name = "Fp128_Packed";
 
     lat_add(name, zero, &a, c);
     lat_sub(name, zero, &a, c);
     lat_mul(name, one, &a, c);
-    thr_add(name, &a, &b, &mut out, c);
-    thr_sub(name, &a, &b, &mut out, c);
-    thr_mul(name, &a, &b, &mut out, c);
+    thr_add(name, &a, c);
+    thr_sub(name, &a, c);
+    thr_mul(name, &a, c);
 }
 
 fn bench_bn254(c: &mut Criterion) {
     type F = BN254Fr;
     let a = make_bn254(N);
-    let b = make_bn254(N);
-    let mut out = vec![F::ZERO; N];
     let name = "BN254_Fr";
 
     lat_add(name, F::ZERO, &a, c);
     lat_sub(name, F::ZERO, &a, c);
     lat_mul(name, F::ONE, &a, c);
-    thr_add(name, &a, &b, &mut out, c);
-    thr_sub(name, &a, &b, &mut out, c);
-    thr_mul(name, &a, &b, &mut out, c);
+    thr_add(name, &a, c);
+    thr_sub(name, &a, c);
+    thr_mul(name, &a, c);
 }
 
 fn bench_gf128(c: &mut Criterion) {
     let a = make_gf128(N);
-    let b = make_gf128(N);
-    let mut out = vec![GF128::ZERO; N];
     let name = "GF128_Ghash";
 
     lat_add(name, GF128::ZERO, &a, c);
     lat_sub(name, GF128::ZERO, &a, c);
     lat_mul(name, GF128::ONE, &a, c);
-    thr_add(name, &a, &b, &mut out, c);
-    thr_sub(name, &a, &b, &mut out, c);
-    thr_mul(name, &a, &b, &mut out, c);
+    thr_add(name, &a, c);
+    thr_sub(name, &a, c);
+    thr_mul(name, &a, c);
 }
 
 criterion_group!(
