@@ -15,6 +15,9 @@ p3-field = { git = "https://github.com/Plonky3/Plonky3.git", rev = "b482e1be5f6d
 # 128-bit prime field (p = 2^128 - 275)
 hachi-pcs = { git = "https://github.com/a16z/hachi", rev = "9c8bbafb79392bfde4b30763db0b326d936eeb38", default-features = false }
 
+# GF(2^128) GHASH field
+binius-field = { git = "https://github.com/binius-zk/binius64", rev = "6a69077efb40ee3d09e37e1c9f3511e2a9f75c99" }
+
 # BN254 scalar field (Jolt fork with mul_by_hi_2limbs)
 ark-bn254 = { git = "https://github.com/quangvdao/arkworks-algebra", rev = "8221f4df9673c59b7f1bde82f483d73a36d5b00f", features = ["scalar_field"] }
 ark-ff = { git = "https://github.com/quangvdao/arkworks-algebra", rev = "8221f4df9673c59b7f1bde82f483d73a36d5b00f" }

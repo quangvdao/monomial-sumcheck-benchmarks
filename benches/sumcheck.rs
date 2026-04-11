@@ -4,6 +4,8 @@ use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criteri
 
 use ark_bn254::Fr as BN254Fr;
 use ark_ff::AdditiveGroup;
+use binius_field::BinaryField128bGhash as GF128;
+use binius_field::Field as BiniusField;
 use hachi_pcs::algebra::Prime128Offset275;
 use hachi_pcs::{AdditiveGroup as HachiAdditiveGroup, CanonicalField, FieldCore};
 use p3_baby_bear::BabyBear;
@@ -60,6 +62,16 @@ fn make_fp128(n: usize) -> Vec<Fp128> {
         .map(|chunk| {
             let v = (chunk[0] as u128) | ((chunk[1] as u128) << 64);
             Fp128::from_canonical_u128_reduced(v)
+        })
+        .collect()
+}
+
+fn make_gf128(n: usize) -> Vec<GF128> {
+    let raw = make_u64s(n * 2);
+    raw.chunks(2)
+        .map(|chunk| {
+            let v = (chunk[0] as u128) | ((chunk[1] as u128) << 64);
+            GF128::new(v)
         })
         .collect()
 }
@@ -409,5 +421,14 @@ fn bench_fp128(c: &mut Criterion) {
     );
 }
 
-criterion_group!(benches, bench_bn254, bench_bb4, bench_bb5, bench_fp128);
+fn bench_gf128(c: &mut Criterion) {
+    let ns = [16u32, 20];
+    bench_field!(
+        "GF128",
+        make_gf128, make_gf128, GF128::ZERO, GF128::ONE,
+        ns, c
+    );
+}
+
+criterion_group!(benches, bench_bn254, bench_bb4, bench_bb5, bench_fp128, bench_gf128);
 criterion_main!(benches);

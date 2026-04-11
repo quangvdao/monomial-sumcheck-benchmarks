@@ -4,6 +4,8 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 use ark_bn254::Fr as BN254Fr;
 use ark_ff::{AdditiveGroup as ArkAdditiveGroup, Field as ArkField};
+use binius_field::BinaryField128bGhash as GF128;
+use binius_field::Field as BiniusField;
 use hachi_pcs::algebra::{Fp128Packing, PackedField, PackedValue, Prime128Offset275};
 use hachi_pcs::{AdditiveGroup as HachiAdditiveGroup, CanonicalField, FieldCore};
 use p3_baby_bear::BabyBear;
@@ -183,6 +185,16 @@ fn make_bn254(n: usize) -> Vec<BN254Fr> {
     make_u64s(n).iter().map(|&v| BN254Fr::from(v)).collect()
 }
 
+fn make_gf128(n: usize) -> Vec<GF128> {
+    let raw = make_u64s(n * 2);
+    raw.chunks(2)
+        .map(|chunk| {
+            let v = (chunk[0] as u128) | ((chunk[1] as u128) << 64);
+            GF128::new(v)
+        })
+        .collect()
+}
+
 // ---------------------------------------------------------------------------
 // Benchmark groups
 // ---------------------------------------------------------------------------
@@ -289,6 +301,20 @@ fn bench_bn254(c: &mut Criterion) {
     thr_mul(name, &a, &b, &mut out, c);
 }
 
+fn bench_gf128(c: &mut Criterion) {
+    let a = make_gf128(N);
+    let b = make_gf128(N);
+    let mut out = vec![GF128::ZERO; N];
+    let name = "GF128_Ghash";
+
+    lat_add(name, GF128::ZERO, &a, c);
+    lat_sub(name, GF128::ZERO, &a, c);
+    lat_mul(name, GF128::ONE, &a, c);
+    thr_add(name, &a, &b, &mut out, c);
+    thr_sub(name, &a, &b, &mut out, c);
+    thr_mul(name, &a, &b, &mut out, c);
+}
+
 criterion_group!(
     benches,
     bench_babybear,
@@ -297,6 +323,7 @@ criterion_group!(
     bench_koalabear_ext5,
     bench_fp128,
     bench_fp128_packed,
-    bench_bn254
+    bench_bn254,
+    bench_gf128
 );
 criterion_main!(benches);
