@@ -8,17 +8,25 @@ criterion = { version = "0.5", features = ["html_reports"] }
 rand = "0.8"
 
 # Plonky3 fields
-p3-baby-bear = { path = "../../../SNARKs/plonky3/baby-bear" }
-p3-koala-bear = { path = "../../../SNARKs/plonky3/koala-bear" }
-p3-field = { path = "../../../SNARKs/plonky3/field" }
+p3-baby-bear = { path = "../../SNARKs/plonky3/baby-bear" }
+p3-koala-bear = { path = "../../SNARKs/plonky3/koala-bear" }
+p3-field = { path = "../../SNARKs/plonky3/field" }
 
 # 128-bit prime field (p = 2^128 - 275)
-hachi-pcs = { path = "../../../SNARKs/hachi", default-features = false }
+hachi-pcs = { path = "../../SNARKs/hachi", default-features = false }
 
-# BN254 scalar field
-ark-bn254 = { git = "https://github.com/a16z/arkworks-algebra", branch = "dev/twist-shout", features = ["scalar_field"] }
-ark-ff = { git = "https://github.com/a16z/arkworks-algebra", branch = "dev/twist-shout" }
+# BN254 scalar field (local Jolt fork with mul_by_hi_2limbs)
+ark-bn254 = { path = "../../SNARKs/arkworks-algebra-jolt/curves/bn254", features = ["scalar_field"] }
+ark-ff = { path = "../../SNARKs/arkworks-algebra-jolt/ff" }
 
 [[bench]]
 name = "field_ops"
+harness = false
+
+[[bench]]
+name = "binding"
+harness = false
+
+[[bench]]
+name = "lookup_tables"
 harness = false
