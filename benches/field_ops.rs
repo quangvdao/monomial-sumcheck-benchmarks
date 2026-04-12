@@ -3,15 +3,19 @@ use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 use ark_bn254::Fr as BN254Fr;
-use ark_ff::{AdditiveGroup as ArkAdditiveGroup, Field as ArkField};
-use binius_field::BinaryField128bGhash as GF128;
+use ark_ff::{AdditiveGroup as ArkAdditiveGroup, Field as ArkField, UniformRand};
+use binius_field::BinaryField128bGhash;
 use binius_field::Field as BiniusField;
+use binius_field::PackedBinaryGhash1x128b as GF128Packed;
+use binius_field::PackedField as BiniusPackedField;
 use hachi_pcs::algebra::{Fp128Packing, PackedField, PackedValue, Prime128Offset275};
 use hachi_pcs::{AdditiveGroup as HachiAdditiveGroup, CanonicalField, FieldCore};
 use p3_baby_bear::BabyBear;
 use p3_field::extension::{BinomialExtensionField, QuinticTrinomialExtensionField};
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 
 type BB4 = BinomialExtensionField<BabyBear, 4>;
 type BB5 = BinomialExtensionField<BabyBear, 5>;
@@ -20,14 +24,8 @@ type PackedFp128 = Fp128Packing<0xfffffffffffffffffffffffffffffeedu128>;
 
 const N: usize = 4096;
 
-fn make_u64s(n: usize) -> Vec<u64> {
-    let mut vals = Vec::with_capacity(n);
-    let mut state: u64 = 0xdeadbeef12345678;
-    for _ in 0..n {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        vals.push(state);
-    }
-    vals
+fn rng() -> StdRng {
+    StdRng::seed_from_u64(0x12345678deadbeef)
 }
 
 // ---------------------------------------------------------------------------
@@ -121,52 +119,43 @@ fn thr_mul<F: Copy + Mul<Output = F>>(name: &str, seed: &[F], c: &mut Criterion)
 }
 
 // ---------------------------------------------------------------------------
-// Element generation
+// Element generation: proper random field elements via each library's RNG
 // ---------------------------------------------------------------------------
 
 fn make_babybear(n: usize) -> Vec<BabyBear> {
-    make_u64s(n)
-        .iter()
-        .map(|&v| BabyBear::from_u32(v as u32))
+    let mut r = rng();
+    (0..n)
+        .map(|_| BabyBear::from_u32(r.gen::<u32>() % ((1u64 << 31) - (1u64 << 27) + 1) as u32))
         .collect()
 }
 
 fn make_bb_ext<const D: usize>(n: usize) -> Vec<BinomialExtensionField<BabyBear, D>> {
-    let raw = make_u64s(n * D);
-    raw.chunks(D)
-        .map(|chunk| {
-            let base: [BabyBear; D] =
-                std::array::from_fn(|i| BabyBear::from_u32(chunk[i] as u32));
+    let mut r = rng();
+    let p = ((1u64 << 31) - (1u64 << 27) + 1) as u32;
+    (0..n)
+        .map(|_| {
+            let base: [BabyBear; D] = std::array::from_fn(|_| BabyBear::from_u32(r.gen::<u32>() % p));
             BinomialExtensionField::new(base)
         })
         .collect()
 }
 
-fn make_koalabear(n: usize) -> Vec<KoalaBear> {
-    make_u64s(n)
-        .iter()
-        .map(|&v| KoalaBear::from_u32(v as u32))
-        .collect()
-}
-
 fn make_kb5(n: usize) -> Vec<KB5> {
-    let raw = make_u64s(n * 5);
-    raw.chunks(5)
-        .map(|chunk| {
+    let mut r = rng();
+    let p = ((1u64 << 31) - (1u64 << 24) + 1) as u32;
+    (0..n)
+        .map(|_| {
             let base: [KoalaBear; 5] =
-                std::array::from_fn(|i| KoalaBear::from_u32(chunk[i] as u32));
+                std::array::from_fn(|_| KoalaBear::from_u32(r.gen::<u32>() % p));
             KB5::new(base)
         })
         .collect()
 }
 
 fn make_fp128(n: usize) -> Vec<Prime128Offset275> {
-    let raw = make_u64s(n * 2);
-    raw.chunks(2)
-        .map(|chunk| {
-            let v = (chunk[0] as u128) | ((chunk[1] as u128) << 64);
-            Prime128Offset275::from_canonical_u128_reduced(v)
-        })
+    let mut r = rng();
+    (0..n)
+        .map(|_| Prime128Offset275::from_canonical_u128_reduced(r.gen::<u128>()))
         .collect()
 }
 
@@ -176,16 +165,14 @@ fn make_fp128_packed(n: usize) -> Vec<PackedFp128> {
 }
 
 fn make_bn254(n: usize) -> Vec<BN254Fr> {
-    make_u64s(n).iter().map(|&v| BN254Fr::from(v)).collect()
+    let mut r = rng();
+    (0..n).map(|_| BN254Fr::rand(&mut r)).collect()
 }
 
-fn make_gf128(n: usize) -> Vec<GF128> {
-    let raw = make_u64s(n * 2);
-    raw.chunks(2)
-        .map(|chunk| {
-            let v = (chunk[0] as u128) | ((chunk[1] as u128) << 64);
-            GF128::new(v)
-        })
+fn make_gf128(n: usize) -> Vec<GF128Packed> {
+    let mut r = rng();
+    (0..n)
+        .map(|_| GF128Packed::set_single(BinaryField128bGhash::new(r.gen::<u128>())))
         .collect()
 }
 
@@ -283,11 +270,13 @@ fn bench_bn254(c: &mut Criterion) {
 
 fn bench_gf128(c: &mut Criterion) {
     let a = make_gf128(N);
+    let zero = GF128Packed::set_single(BinaryField128bGhash::ZERO);
+    let one = GF128Packed::set_single(BinaryField128bGhash::ONE);
     let name = "GF128_Ghash";
 
-    lat_add(name, GF128::ZERO, &a, c);
-    lat_sub(name, GF128::ZERO, &a, c);
-    lat_mul(name, GF128::ONE, &a, c);
+    lat_add(name, zero, &a, c);
+    lat_sub(name, zero, &a, c);
+    lat_mul(name, one, &a, c);
     thr_add(name, &a, c);
     thr_sub(name, &a, c);
     thr_mul(name, &a, c);
