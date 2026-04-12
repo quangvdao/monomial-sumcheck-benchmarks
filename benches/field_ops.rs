@@ -69,20 +69,22 @@ fn lat_mul<F: Copy + MulAssign>(name: &str, one: F, elems: &[F], c: &mut Criteri
 }
 
 // ---------------------------------------------------------------------------
-// Throughput: in-register batch of BATCH independent ops per pass.
-// Uses stride BATCH/2 so the compiler can pipeline without serial deps.
+// Throughput: in-register batch of B independent ops.
+// B is a const generic sized to each field's register footprint so the
+// working set stays register-resident.  B * PASSES = OPS = 1024 always,
+// so per-op cost = raw time / 1024.
 // ---------------------------------------------------------------------------
 
-const BATCH: usize = 16;
-const PASSES: usize = 64;
+const OPS: usize = 1024;
 
-fn thr_add<F: Copy + Add<Output = F>>(name: &str, seed: &[F], c: &mut Criterion) {
-    let mut batch: [F; BATCH] = std::array::from_fn(|i| seed[i % seed.len()]);
+fn thr_add<F: Copy + Add<Output = F>, const B: usize>(name: &str, seed: &[F], c: &mut Criterion) {
+    let passes = OPS / B;
+    let mut batch: [F; B] = std::array::from_fn(|i| seed[i % seed.len()]);
     c.bench_function(&format!("{name}/thr_add"), |b| {
         b.iter(|| {
-            for _ in 0..PASSES {
-                for i in 0..BATCH {
-                    batch[i] = batch[i] + batch[(i + BATCH / 2) % BATCH];
+            for _ in 0..passes {
+                for i in 0..B {
+                    batch[i] = batch[i] + batch[(i + B / 2) % B];
                 }
             }
             black_box(batch)
@@ -90,13 +92,14 @@ fn thr_add<F: Copy + Add<Output = F>>(name: &str, seed: &[F], c: &mut Criterion)
     });
 }
 
-fn thr_sub<F: Copy + Sub<Output = F>>(name: &str, seed: &[F], c: &mut Criterion) {
-    let mut batch: [F; BATCH] = std::array::from_fn(|i| seed[i % seed.len()]);
+fn thr_sub<F: Copy + Sub<Output = F>, const B: usize>(name: &str, seed: &[F], c: &mut Criterion) {
+    let passes = OPS / B;
+    let mut batch: [F; B] = std::array::from_fn(|i| seed[i % seed.len()]);
     c.bench_function(&format!("{name}/thr_sub"), |b| {
         b.iter(|| {
-            for _ in 0..PASSES {
-                for i in 0..BATCH {
-                    batch[i] = batch[i] - batch[(i + BATCH / 2) % BATCH];
+            for _ in 0..passes {
+                for i in 0..B {
+                    batch[i] = batch[i] - batch[(i + B / 2) % B];
                 }
             }
             black_box(batch)
@@ -104,13 +107,14 @@ fn thr_sub<F: Copy + Sub<Output = F>>(name: &str, seed: &[F], c: &mut Criterion)
     });
 }
 
-fn thr_mul<F: Copy + Mul<Output = F>>(name: &str, seed: &[F], c: &mut Criterion) {
-    let mut batch: [F; BATCH] = std::array::from_fn(|i| seed[i % seed.len()]);
+fn thr_mul<F: Copy + Mul<Output = F>, const B: usize>(name: &str, seed: &[F], c: &mut Criterion) {
+    let passes = OPS / B;
+    let mut batch: [F; B] = std::array::from_fn(|i| seed[i % seed.len()]);
     c.bench_function(&format!("{name}/thr_mul"), |b| {
         b.iter(|| {
-            for _ in 0..PASSES {
-                for i in 0..BATCH {
-                    batch[i] = batch[i] * batch[(i + BATCH / 2) % BATCH];
+            for _ in 0..passes {
+                for i in 0..B {
+                    batch[i] = batch[i] * batch[(i + B / 2) % B];
                 }
             }
             black_box(batch)
@@ -180,6 +184,9 @@ fn make_gf128(n: usize) -> Vec<GF128Packed> {
 // Benchmark groups
 // ---------------------------------------------------------------------------
 
+// Batch sizes: B=16 for elements <=20 bytes (enough ILP without spilling).
+// B=4 for 32-byte types (BN254, Fp128 packed) to avoid register exhaustion.
+
 fn bench_babybear(c: &mut Criterion) {
     let a = make_babybear(N);
     let name = "BabyBear";
@@ -187,9 +194,9 @@ fn bench_babybear(c: &mut Criterion) {
     lat_add(name, BabyBear::ZERO, &a, c);
     lat_sub(name, BabyBear::ZERO, &a, c);
     lat_mul(name, BabyBear::ONE, &a, c);
-    thr_add(name, &a, c);
-    thr_sub(name, &a, c);
-    thr_mul(name, &a, c);
+    thr_add::<_, 16>(name, &a, c);
+    thr_sub::<_, 16>(name, &a, c);
+    thr_mul::<_, 16>(name, &a, c);
 }
 
 fn bench_babybear_ext4(c: &mut Criterion) {
@@ -199,9 +206,9 @@ fn bench_babybear_ext4(c: &mut Criterion) {
     lat_add(name, BB4::ZERO, &a, c);
     lat_sub(name, BB4::ZERO, &a, c);
     lat_mul(name, BB4::ONE, &a, c);
-    thr_add(name, &a, c);
-    thr_sub(name, &a, c);
-    thr_mul(name, &a, c);
+    thr_add::<_, 16>(name, &a, c);
+    thr_sub::<_, 16>(name, &a, c);
+    thr_mul::<_, 16>(name, &a, c);
 }
 
 fn bench_babybear_ext5(c: &mut Criterion) {
@@ -211,9 +218,9 @@ fn bench_babybear_ext5(c: &mut Criterion) {
     lat_add(name, BB5::ZERO, &a, c);
     lat_sub(name, BB5::ZERO, &a, c);
     lat_mul(name, BB5::ONE, &a, c);
-    thr_add(name, &a, c);
-    thr_sub(name, &a, c);
-    thr_mul(name, &a, c);
+    thr_add::<_, 16>(name, &a, c);
+    thr_sub::<_, 16>(name, &a, c);
+    thr_mul::<_, 16>(name, &a, c);
 }
 
 fn bench_koalabear_ext5(c: &mut Criterion) {
@@ -223,9 +230,9 @@ fn bench_koalabear_ext5(c: &mut Criterion) {
     lat_add(name, KB5::ZERO, &a, c);
     lat_sub(name, KB5::ZERO, &a, c);
     lat_mul(name, KB5::ONE, &a, c);
-    thr_add(name, &a, c);
-    thr_sub(name, &a, c);
-    thr_mul(name, &a, c);
+    thr_add::<_, 16>(name, &a, c);
+    thr_sub::<_, 16>(name, &a, c);
+    thr_mul::<_, 16>(name, &a, c);
 }
 
 fn bench_fp128(c: &mut Criterion) {
@@ -236,9 +243,9 @@ fn bench_fp128(c: &mut Criterion) {
     lat_add(name, F::ZERO, &a, c);
     lat_sub(name, F::ZERO, &a, c);
     lat_mul(name, F::one(), &a, c);
-    thr_add(name, &a, c);
-    thr_sub(name, &a, c);
-    thr_mul(name, &a, c);
+    thr_add::<_, 16>(name, &a, c);
+    thr_sub::<_, 16>(name, &a, c);
+    thr_mul::<_, 16>(name, &a, c);
 }
 
 fn bench_fp128_packed(c: &mut Criterion) {
@@ -250,9 +257,9 @@ fn bench_fp128_packed(c: &mut Criterion) {
     lat_add(name, zero, &a, c);
     lat_sub(name, zero, &a, c);
     lat_mul(name, one, &a, c);
-    thr_add(name, &a, c);
-    thr_sub(name, &a, c);
-    thr_mul(name, &a, c);
+    thr_add::<_, 8>(name, &a, c);
+    thr_sub::<_, 8>(name, &a, c);
+    thr_mul::<_, 8>(name, &a, c);
 }
 
 fn bench_bn254(c: &mut Criterion) {
@@ -263,9 +270,9 @@ fn bench_bn254(c: &mut Criterion) {
     lat_add(name, F::ZERO, &a, c);
     lat_sub(name, F::ZERO, &a, c);
     lat_mul(name, F::ONE, &a, c);
-    thr_add(name, &a, c);
-    thr_sub(name, &a, c);
-    thr_mul(name, &a, c);
+    thr_add::<_, 4>(name, &a, c);
+    thr_sub::<_, 4>(name, &a, c);
+    thr_mul::<_, 4>(name, &a, c);
 }
 
 fn bench_gf128(c: &mut Criterion) {
@@ -277,9 +284,9 @@ fn bench_gf128(c: &mut Criterion) {
     lat_add(name, zero, &a, c);
     lat_sub(name, zero, &a, c);
     lat_mul(name, one, &a, c);
-    thr_add(name, &a, c);
-    thr_sub(name, &a, c);
-    thr_mul(name, &a, c);
+    thr_add::<_, 16>(name, &a, c);
+    thr_sub::<_, 16>(name, &a, c);
+    thr_mul::<_, 16>(name, &a, c);
 }
 
 criterion_group!(
