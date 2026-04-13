@@ -1,37 +1,52 @@
 # monomial-sumcheck-benchmarks
 
-This repo contains the benchmark harness used to generate the field operation, binding, lookup table, and end-to-end sumcheck measurements for the monomial sumcheck paper.
+Benchmark harness for the paper *The Sum-Check Protocol over the Monomial Basis, and Other Optimizations*.
+
+## Benchmark suites
+
+| Suite | File | What it measures |
+|---|---|---|
+| `field_ops` | `benches/field_ops.rs` | Field add/sub/mul latency and throughput across BN254, Fp128, BabyBear extensions, GF(2^128) |
+| `binding` | `benches/binding.rs` | Per-element binding latency, upper-limb multiplication, and combined in-place binding (Section 6.4) |
+| `lookup_tables` | `benches/lookup_tables.rs` | Full-domain EQ and LT table construction |
+| `sumcheck` | `benches/sumcheck.rs` | End-to-end sum-check prover (degree-2 and degree-2 x eq) |
+
+## Pinned dependencies
+
+All dependencies are pinned to exact git revisions for reproducibility.
+
+| Crate | Repository | Commit |
+|---|---|---|
+| `p3-baby-bear`, `p3-koala-bear`, `p3-field` | [Plonky3/Plonky3](https://github.com/Plonky3/Plonky3) | `b482e1be5f6d2e0917c5ecea3009335bbfd94e42` |
+| `hachi-pcs` | [LayerZero-Labs/hachi](https://github.com/LayerZero-Labs/hachi) | `7e81702c87bd7adb9caeb7cb5064d65e16f740ff` |
+| `binius-field` | [binius-zk/binius64](https://github.com/binius-zk/binius64) | `6a69077efb40ee3d09e37e1c9f3511e2a9f75c99` |
+| `ark-bn254`, `ark-ff` | [quangvdao/arkworks-algebra](https://github.com/quangvdao/arkworks-algebra) (fork with `mul_by_hi_2limbs`) | `8221f4df9673c59b7f1bde82f483d73a36d5b00f` |
+
+Rust toolchain: `1.94.0` (pinned in `rust-toolchain.toml`).
 
 ## Reproducibility
 
-- The Rust toolchain is pinned in `rust-toolchain.toml`.
-- `hachi-pcs` is pinned to `LayerZero-Labs/hachi` commit `7e81702c87bd7adb9caeb7cb5064d65e16f740ff`, which contains the Fp128 arithmetic used by these benchmarks.
 - Benchmark structure is reproducible across machines, but absolute timings depend on CPU, OS, and target architecture.
-- The paper numbers were collected on Apple Silicon (`aarch64-apple-darwin`).
-- Other machines should be able to run the same harness, but should not expect identical wall-clock times.
+- The paper numbers were collected on an Apple M4 Max (`aarch64-apple-darwin`), single-threaded, with thin LTO enabled.
+- The combined binding benchmark (`bench_combined` in `binding.rs`) follows Jolt's `bound_poly_var_top` layout: in-place binding on a contiguous 2N-element array. Each iteration restores the buffer via `memcpy`; reported times in the paper subtract the measured copy overhead.
 
-## Sanity Check
+## Usage
 
 ```bash
+# Sanity check
 cargo check --benches
-```
 
-## Run All Benchmark Suites
-
-```bash
+# Run all suites
 cargo bench --bench field_ops
 cargo bench --bench binding
 cargo bench --bench lookup_tables
 cargo bench --bench sumcheck
-```
 
-## Reproduce The Paper's Sumcheck Rows
-
-The paper reports the end-to-end sumcheck numbers for `n = 20`.
-To rerun that subset:
-
-```bash
+# Reproduce the paper's end-to-end sumcheck rows (n = 20)
 cargo bench --bench sumcheck -- 'sumcheck_deg2/.*/20|sumcheck_deg2_eq/.*/20'
+
+# Reproduce the combined binding table (Section 6.4)
+cargo bench --bench binding -- 'combined'
 ```
 
 ## Output
