@@ -13,7 +13,8 @@ p3-koala-bear = { git = "https://github.com/Plonky3/Plonky3.git", rev = "b482e1b
 p3-field = { git = "https://github.com/Plonky3/Plonky3.git", rev = "b482e1be5f6d2e0917c5ecea3009335bbfd94e42" }
 
 # 128-bit prime field (p = 2^128 - 275)
-hachi-pcs = { git = "https://github.com/a16z/hachi", rev = "9c8bbafb79392bfde4b30763db0b326d936eeb38", default-features = false }
+# Exact hachi revision containing the Fp128 arithmetic used by these benchmarks.
+hachi-pcs = { git = "https://github.com/LayerZero-Labs/hachi.git", rev = "7e81702c87bd7adb9caeb7cb5064d65e16f740ff", default-features = false }
 
 # GF(2^128) GHASH field
 binius-field = { git = "https://github.com/binius-zk/binius64", rev = "6a69077efb40ee3d09e37e1c9f3511e2a9f75c99" }
@@ -21,6 +22,10 @@ binius-field = { git = "https://github.com/binius-zk/binius64", rev = "6a69077ef
 # BN254 scalar field (Jolt fork with mul_by_hi_2limbs)
 ark-bn254 = { git = "https://github.com/quangvdao/arkworks-algebra", rev = "8221f4df9673c59b7f1bde82f483d73a36d5b00f", features = ["scalar_field"] }
 ark-ff = { git = "https://github.com/quangvdao/arkworks-algebra", rev = "8221f4df9673c59b7f1bde82f483d73a36d5b00f" }
+paste = "1.0.15"
+
+[profile.bench]
+lto = "thin"
 
 [[bench]]
 name = "field_ops"

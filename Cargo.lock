@@ -581,7 +581,7 @@ dependencies = [
 [[package]]
 name = "hachi-derive"
 version = "0.1.0"
-source = "git+https://github.com/a16z/hachi?rev=9c8bbafb79392bfde4b30763db0b326d936eeb38#9c8bbafb79392bfde4b30763db0b326d936eeb38"
+source = "git+https://github.com/LayerZero-Labs/hachi.git?rev=7e81702c87bd7adb9caeb7cb5064d65e16f740ff#7e81702c87bd7adb9caeb7cb5064d65e16f740ff"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -591,7 +591,7 @@ dependencies = [
 [[package]]
 name = "hachi-pcs"
 version = "0.1.0"
-source = "git+https://github.com/a16z/hachi?rev=9c8bbafb79392bfde4b30763db0b326d936eeb38#9c8bbafb79392bfde4b30763db0b326d936eeb38"
+source = "git+https://github.com/LayerZero-Labs/hachi.git?rev=7e81702c87bd7adb9caeb7cb5064d65e16f740ff#7e81702c87bd7adb9caeb7cb5064d65e16f740ff"
 dependencies = [
  "aes",
  "blake2",
@@ -734,6 +734,7 @@ dependencies = [
  "p3-baby-bear",
  "p3-field",
  "p3-koala-bear",
+ "paste",
  "rand 0.8.5",
 ]
 
