@@ -184,40 +184,69 @@ fn bench_upper_limb_binding(c: &mut Criterion) {
 
 // ---------------------------------------------------------------------------
 // Combined benchmark (Section 6.4)
-// Baseline: Boolean + full-field challenge
-// Optimized: Projective + upper-limb challenge
+// Faithful to Jolt's DensePolynomial::bound_poly_var_top: in-place binding
+// on a single interleaved array Z, where left = Z[..N], right = Z[N..].
+//
+// Each iteration restores the working buffer via memcpy (same overhead for
+// all three variants, keeps data warm in cache as it would be in a real
+// prover after the preceding evaluation pass).
 // ---------------------------------------------------------------------------
 
 fn bench_combined(c: &mut Criterion) {
-    let p0 = make_bn254(N);
-    let p1 = make_bn254(N);
-    let p_inf = make_bn254(N);
+    let template = make_bn254(2 * N);
     let r_full = BN254Fr::from(0x123456789abcdef0u64);
     let (_, lo, hi) = make_upper_limb_challenge();
-    let mut out = vec![BN254Fr::ZERO; N];
+    let mut work = template.clone();
+
+    c.bench_function("BN254/combined_memcpy", |b| {
+        b.iter(|| {
+            work.copy_from_slice(&template);
+            black_box(work[0]);
+        })
+    });
 
     c.bench_function("BN254/combined_baseline", |b| {
         b.iter(|| {
-            bind_boolean_loop(
-                black_box(&p0),
-                black_box(&p1),
-                black_box(r_full),
-                &mut out,
-            );
-            black_box(&out);
+            work.copy_from_slice(&template);
+            let (left, right) = work.split_at_mut(N);
+            for (a, b_val) in left.iter_mut().zip(right.iter()) {
+                *a += r_full * (*b_val - *a);
+            }
+            black_box(left[0]);
+        })
+    });
+
+    c.bench_function("BN254/combined_boolean_upper", |b| {
+        b.iter(|| {
+            work.copy_from_slice(&template);
+            let (left, right) = work.split_at_mut(N);
+            for (a, b_val) in left.iter_mut().zip(right.iter()) {
+                let diff = *b_val - *a;
+                *a += diff.mul_by_hi_2limbs(lo, hi);
+            }
+            black_box(left[0]);
+        })
+    });
+
+    c.bench_function("BN254/combined_projective_full", |b| {
+        b.iter(|| {
+            work.copy_from_slice(&template);
+            let (left, right) = work.split_at_mut(N);
+            for (a, b_val) in left.iter_mut().zip(right.iter()) {
+                *a += r_full * *b_val;
+            }
+            black_box(left[0]);
         })
     });
 
     c.bench_function("BN254/combined_optimized", |b| {
         b.iter(|| {
-            bind_projective_upper_limb_loop(
-                black_box(&p0),
-                black_box(&p_inf),
-                black_box(lo),
-                black_box(hi),
-                &mut out,
-            );
-            black_box(&out);
+            work.copy_from_slice(&template);
+            let (left, right) = work.split_at_mut(N);
+            for (a, b_val) in left.iter_mut().zip(right.iter()) {
+                *a += b_val.mul_by_hi_2limbs(lo, hi);
+            }
+            black_box(left[0]);
         })
     });
 }

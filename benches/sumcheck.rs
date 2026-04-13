@@ -9,7 +9,7 @@ use ark_ff::{AdditiveGroup, MontConfig};
 use binius_field::BinaryField128bGhash as GF128;
 use binius_field::Field as BiniusField;
 use hachi_pcs::algebra::Prime128Offset275;
-use hachi_pcs::{AdditiveGroup as HachiAdditiveGroup, CanonicalField, FieldCore};
+use hachi_pcs::{AdditiveGroup as HachiAdditiveGroup, CanonicalField, FieldCore, Invertible};
 use p3_baby_bear::BabyBear;
 #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
 use p3_baby_bear::PackedBabyBearNeon;
@@ -367,6 +367,96 @@ fn sumcheck_deg2_projective_fp128(
     }
 }
 
+// Fp128-only experiment: store each linear factor as (p(1), p(infinity)).
+// Evaluation reconstructs p(0) = p(1) - p(infinity), while binding uses
+// p(r) = p(1) + (r - 1) * p(infinity) so the subtraction is paid once/round.
+fn sumcheck_deg2_projective_1inf_fp128(
+    f: &mut Vec<Fp128>,
+    g: &mut Vec<Fp128>,
+    challenges: &[Fp128],
+    zero: Fp128,
+) {
+    let one = Fp128::one();
+    for round in 0..challenges.len() {
+        let half = f.len() / 2;
+
+        let mut h0 = zero;
+        let mut h1 = zero;
+        let mut h_inf = zero;
+
+        for j in 0..half {
+            let f1 = f[2 * j];
+            let fi = f[2 * j + 1];
+            let g1 = g[2 * j];
+            let gi = g[2 * j + 1];
+            let f0 = f1 - fi;
+            let g0 = g1 - gi;
+
+            h0 += f0 * g0;
+            h1 += f1 * g1;
+            h_inf += fi * gi;
+        }
+
+        black_box((h0, h1, h_inf));
+
+        let r = challenges[round];
+        let r_minus_one = r - one;
+
+        for j in 0..half {
+            let f1 = f[2 * j];
+            let fi = f[2 * j + 1];
+            let g1 = g[2 * j];
+            let gi = g[2 * j + 1];
+
+            f[j] = fi.mul_add(r_minus_one, f1);
+            g[j] = gi.mul_add(r_minus_one, g1);
+        }
+
+        f.truncate(half);
+        g.truncate(half);
+    }
+}
+
+#[inline(always)]
+fn sumcheck_deg2_eq_gruen_projective_1inf_q0_q1_fp128(
+    f: &[Fp128],
+    g: &[Fp128],
+    eq_rest: &[Fp128],
+    zero: Fp128,
+) -> (Fp128, Fp128) {
+    let half = f.len() / 2;
+    let mut q0 = zero;
+    let mut q1 = zero;
+
+    for j in 0..half {
+        let f1 = f[2 * j];
+        let fi = f[2 * j + 1];
+        let g1 = g[2 * j];
+        let gi = g[2 * j + 1];
+        let ew = eq_rest[j];
+        let f0 = f1 - fi;
+        let g0 = g1 - gi;
+
+        q0 += f0 * g0 * ew;
+        q1 += f1 * g1 * ew;
+    }
+
+    (q0, q1)
+}
+
+fn init_sumcheck_deg2_eq_gruen_projective_1inf_fp128_claim(
+    f: &[Fp128],
+    g: &[Fp128],
+    suffix_eq: &[Vec<Fp128>],
+    eq_point: &[Fp128],
+    zero: Fp128,
+) -> Fp128 {
+    let (q0, q1) = sumcheck_deg2_eq_gruen_projective_1inf_q0_q1_fp128(f, g, &suffix_eq[1], zero);
+    let w = eq_point[0];
+    let one_minus_w = Fp128::one() - w;
+    q1.mul_add(w, one_minus_w * q0)
+}
+
 fn sumcheck_deg2_eq_gruen_projective_fp128(
     f: &mut Vec<Fp128>,
     g: &mut Vec<Fp128>,
@@ -408,6 +498,72 @@ fn sumcheck_deg2_eq_gruen_projective_fp128(
 
             f[j] = fi.mul_add(r, f0);
             g[j] = gi.mul_add(r, g0);
+        }
+
+        f.truncate(half);
+        g.truncate(half);
+    }
+}
+
+fn sumcheck_deg2_eq_gruen_projective_1inf_fp128(
+    f: &mut Vec<Fp128>,
+    g: &mut Vec<Fp128>,
+    suffix_eq: &[Vec<Fp128>],
+    eq_point: &[Fp128],
+    challenges: &[Fp128],
+    initial_claim: Fp128,
+    zero: Fp128,
+) {
+    let one = Fp128::one();
+    let mut claim = initial_claim;
+    let mut current_scalar = one;
+    let n = challenges.len();
+    for round in 0..n {
+        let half = f.len() / 2;
+        let eq_rest = &suffix_eq[round + 1];
+
+        let mut q1 = zero;
+        let mut q_inf = zero;
+
+        for j in 0..half {
+            let f1 = f[2 * j];
+            let fi = f[2 * j + 1];
+            let g1 = g[2 * j];
+            let gi = g[2 * j + 1];
+            let ew = eq_rest[j];
+
+            q1 += f1 * g1 * ew;
+            q_inf += fi * gi * ew;
+        }
+
+        let w = eq_point[round];
+        let one_minus_w = one - w;
+        let q0 = if one_minus_w == zero || current_scalar == zero {
+            sumcheck_deg2_eq_gruen_projective_1inf_q0_q1_fp128(f, g, eq_rest, zero).0
+        } else {
+            let normalized_claim = claim * current_scalar.inv_or_zero();
+            (normalized_claim - w * q1) * one_minus_w.inv_or_zero()
+        };
+
+        black_box((q0, q1, q_inf));
+
+        let r = challenges[round];
+        let r_minus_one = r - one;
+        let r_times_r_minus_one = r * r_minus_one;
+        let q_r = q_inf.mul_add(r_times_r_minus_one, (q1 - q0).mul_add(r, q0));
+        let eq_eval = (w - one_minus_w).mul_add(r, one_minus_w);
+
+        current_scalar = current_scalar * eq_eval;
+        claim = current_scalar * q_r;
+
+        for j in 0..half {
+            let f1 = f[2 * j];
+            let fi = f[2 * j + 1];
+            let g1 = g[2 * j];
+            let gi = g[2 * j + 1];
+
+            f[j] = fi.mul_add(r_minus_one, f1);
+            g[j] = gi.mul_add(r_minus_one, g1);
         }
 
         f.truncate(half);
@@ -836,6 +992,49 @@ fn sumcheck_deg2_projective_delayed_fp128(
     }
 }
 
+fn sumcheck_deg2_projective_1inf_delayed_fp128(
+    f: &mut Vec<Fp128>,
+    g: &mut Vec<Fp128>,
+    challenges: &[Fp128],
+) {
+    let one = Fp128::one();
+    for round in 0..challenges.len() {
+        let half = f.len() / 2;
+
+        let mut h0 = Fp128Accum::zero();
+        let mut h1 = Fp128Accum::zero();
+        let mut h_inf = Fp128Accum::zero();
+
+        for j in 0..half {
+            let f1 = f[2 * j];
+            let fi = f[2 * j + 1];
+            let g1 = g[2 * j];
+            let gi = g[2 * j + 1];
+            let f0 = f1 - fi;
+            let g0 = g1 - gi;
+
+            h0.fmadd(f0, g0);
+            h1.fmadd(f1, g1);
+            h_inf.fmadd(fi, gi);
+        }
+
+        black_box((h0.reduce(), h1.reduce(), h_inf.reduce()));
+
+        let r = challenges[round];
+        let r_minus_one = r - one;
+        for j in 0..half {
+            let f1 = f[2 * j];
+            let fi = f[2 * j + 1];
+            let g1 = g[2 * j];
+            let gi = g[2 * j + 1];
+            f[j] = fi.mul_add(r_minus_one, f1);
+            g[j] = gi.mul_add(r_minus_one, g1);
+        }
+        f.truncate(half);
+        g.truncate(half);
+    }
+}
+
 // --- Degree-2 x eq (Gruen split-eq) with delayed reduction (Projective basis) ---
 
 fn sumcheck_deg2_eq_projective_delayed_bn254(
@@ -918,6 +1117,71 @@ fn sumcheck_deg2_eq_projective_delayed_fp128(
             let gi = g[2 * j + 1];
             f[j] = fi.mul_add(r, f0);
             g[j] = gi.mul_add(r, g0);
+        }
+        f.truncate(half);
+        g.truncate(half);
+    }
+}
+
+fn sumcheck_deg2_eq_projective_1inf_delayed_fp128(
+    f: &mut Vec<Fp128>,
+    g: &mut Vec<Fp128>,
+    suffix_eq: &[Vec<Fp128>],
+    eq_point: &[Fp128],
+    challenges: &[Fp128],
+    initial_claim: Fp128,
+) {
+    let one = Fp128::one();
+    let mut claim = initial_claim;
+    let mut current_scalar = one;
+    let n = challenges.len();
+    for round in 0..n {
+        let half = f.len() / 2;
+        let eq_rest = &suffix_eq[round + 1];
+
+        let mut q1 = Fp128Accum::zero();
+        let mut q_inf = Fp128Accum::zero();
+
+        for j in 0..half {
+            let f1 = f[2 * j];
+            let fi = f[2 * j + 1];
+            let g1 = g[2 * j];
+            let gi = g[2 * j + 1];
+            let ew = eq_rest[j];
+
+            q1.fmadd(f1 * g1, ew);
+            q_inf.fmadd(fi * gi, ew);
+        }
+
+        let q1 = q1.reduce();
+        let q_inf = q_inf.reduce();
+        let w = eq_point[round];
+        let one_minus_w = one - w;
+        let q0 = if one_minus_w == Fp128::ZERO || current_scalar == Fp128::ZERO {
+            sumcheck_deg2_eq_gruen_projective_1inf_q0_q1_fp128(f, g, eq_rest, Fp128::ZERO).0
+        } else {
+            let normalized_claim = claim * current_scalar.inv_or_zero();
+            (normalized_claim - w * q1) * one_minus_w.inv_or_zero()
+        };
+
+        black_box((q0, q1, q_inf));
+
+        let r = challenges[round];
+        let r_minus_one = r - one;
+        let r_times_r_minus_one = r * r_minus_one;
+        let q_r = q_inf.mul_add(r_times_r_minus_one, (q1 - q0).mul_add(r, q0));
+        let eq_eval = (w - one_minus_w).mul_add(r, one_minus_w);
+
+        current_scalar = current_scalar * eq_eval;
+        claim = current_scalar * q_r;
+
+        for j in 0..half {
+            let f1 = f[2 * j];
+            let fi = f[2 * j + 1];
+            let g1 = g[2 * j];
+            let gi = g[2 * j + 1];
+            f[j] = fi.mul_add(r_minus_one, f1);
+            g[j] = gi.mul_add(r_minus_one, g1);
         }
         f.truncate(half);
         g.truncate(half);
@@ -1855,11 +2119,36 @@ fn bench_fp128(c: &mut Criterion) {
                 })
             });
 
+            group.bench_with_input(BenchmarkId::new("projective_1inf", n), &n, |b, _| {
+                b.iter(|| {
+                    let mut f = f_orig.clone();
+                    let mut g = g_orig.clone();
+                    sumcheck_deg2_projective_1inf_fp128(
+                        &mut f,
+                        &mut g,
+                        &challenges,
+                        Fp128::ZERO,
+                    );
+                })
+            });
+
             group.bench_with_input(BenchmarkId::new("proj_delayed", n), &n, |b, _| {
                 b.iter(|| {
                     let mut f = f_orig.clone();
                     let mut g = g_orig.clone();
                     sumcheck_deg2_projective_delayed_fp128(&mut f, &mut g, &challenges);
+                })
+            });
+
+            group.bench_with_input(BenchmarkId::new("projective_1inf_delayed", n), &n, |b, _| {
+                b.iter(|| {
+                    let mut f = f_orig.clone();
+                    let mut g = g_orig.clone();
+                    sumcheck_deg2_projective_1inf_delayed_fp128(
+                        &mut f,
+                        &mut g,
+                        &challenges,
+                    );
                 })
             });
         }
@@ -1875,6 +2164,13 @@ fn bench_fp128(c: &mut Criterion) {
             let challenges = make_fp128(n_usize);
             let eq_point = make_fp128(n_usize);
             let suffix_eq = build_suffix_eq_tables(&eq_point, Fp128::one());
+            let initial_claim_1inf = init_sumcheck_deg2_eq_gruen_projective_1inf_fp128_claim(
+                &f_orig,
+                &g_orig,
+                &suffix_eq,
+                &eq_point,
+                Fp128::ZERO,
+            );
 
             group.bench_with_input(BenchmarkId::new("boolean", n), &n, |b, _| {
                 b.iter(|| {
@@ -1917,6 +2213,22 @@ fn bench_fp128(c: &mut Criterion) {
                 })
             });
 
+            group.bench_with_input(BenchmarkId::new("projective_1inf", n), &n, |b, _| {
+                b.iter(|| {
+                    let mut f = f_orig.clone();
+                    let mut g = g_orig.clone();
+                    sumcheck_deg2_eq_gruen_projective_1inf_fp128(
+                        &mut f,
+                        &mut g,
+                        &suffix_eq,
+                        &eq_point,
+                        &challenges,
+                        initial_claim_1inf,
+                        Fp128::ZERO,
+                    );
+                })
+            });
+
             group.bench_with_input(BenchmarkId::new("proj_delayed", n), &n, |b, _| {
                 b.iter(|| {
                     let mut f = f_orig.clone();
@@ -1926,6 +2238,21 @@ fn bench_fp128(c: &mut Criterion) {
                         &mut g,
                         &suffix_eq,
                         &challenges,
+                    );
+                })
+            });
+
+            group.bench_with_input(BenchmarkId::new("projective_1inf_delayed", n), &n, |b, _| {
+                b.iter(|| {
+                    let mut f = f_orig.clone();
+                    let mut g = g_orig.clone();
+                    sumcheck_deg2_eq_projective_1inf_delayed_fp128(
+                        &mut f,
+                        &mut g,
+                        &suffix_eq,
+                        &eq_point,
+                        &challenges,
+                        initial_claim_1inf,
                     );
                 })
             });
