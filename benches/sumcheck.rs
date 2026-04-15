@@ -1,5 +1,10 @@
 #[cfg(target_arch = "aarch64")]
-use std::arch::aarch64::{uint64x2_t, vdupq_n_u64, veorq_u64, vmull_p64};
+use std::arch::aarch64::{
+    uint32x2_t, uint32x4_t, uint64x2_t, vandq_u32, vaddq_u32, vcgtq_u32, vcreate_u32,
+    vdupq_n_u32, vdupq_n_u64, vdup_n_u32, veorq_u64, vget_high_u32, vget_low_u32, vld1q_u32,
+    vminq_u32, vmlal_lane_u32, vmull_high_u32, vmull_lane_u32, vmull_p64, vmull_u32, vmulq_u32,
+    vreinterpretq_u32_u64, vsubq_u32, vuzp1q_u32, vuzp2q_u32,
+};
 use std::ops::{Add, AddAssign, Mul, Sub};
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
@@ -11,11 +16,7 @@ use binius_field::Field as BiniusField;
 use hachi_pcs::algebra::Prime128Offset275;
 use hachi_pcs::{AdditiveGroup as HachiAdditiveGroup, CanonicalField, FieldCore, Invertible};
 use p3_baby_bear::BabyBear;
-#[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
-use p3_baby_bear::PackedBabyBearNeon;
 use p3_field::extension::BinomialExtensionField;
-#[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
-use p3_field::PackedValue;
 use p3_field::PrimeCharacteristicRing;
 
 type BB4 = BinomialExtensionField<BabyBear, 4>;
@@ -1329,11 +1330,31 @@ impl BB5Accum {
     }
 }
 
+#[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+#[inline(always)]
+unsafe fn bb_neon_monty_reduce(res_lo: uint64x2_t, res_hi: uint64x2_t) -> uint32x4_t {
+    let lo = vuzp1q_u32(vreinterpretq_u32_u64(res_lo), vreinterpretq_u32_u64(res_hi));
+    let hi = vuzp2q_u32(vreinterpretq_u32_u64(res_lo), vreinterpretq_u32_u64(res_hi));
+    let neg_p = vdupq_n_u32(0x87FFFFFFu32);
+    let hi_reduced = vminq_u32(hi, vaddq_u32(hi, neg_p));
+    let mu = vdupq_n_u32(BB_MONTY_MU as u32);
+    let m = vmulq_u32(lo, mu);
+    let p = vdupq_n_u32(BB_PRIME as u32);
+    let monty = vuzp2q_u32(
+        vreinterpretq_u32_u64(vmull_u32(vget_low_u32(m), vget_low_u32(p))),
+        vreinterpretq_u32_u64(vmull_high_u32(m, p)),
+    );
+    let cmp = vcgtq_u32(monty, hi_reduced);
+    vaddq_u32(vsubq_u32(hi_reduced, monty), vandq_u32(cmp, p))
+}
+
 struct BB4MulByConst {
     #[cfg(not(all(target_arch = "aarch64", target_feature = "neon")))]
     r: BB4,
     #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
-    cols: [PackedBabyBearNeon; 4],
+    cols_lo: [uint32x2_t; 4],
+    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+    cols_hi: [uint32x2_t; 4],
 }
 
 impl BB4MulByConst {
@@ -1343,16 +1364,28 @@ impl BB4MulByConst {
         {
             let [r0, r1, r2, r3] = bb4_to_coeffs(r);
             let w = BabyBear::from_u32(BB_W4 as u32);
-            let wr1 = w * r1;
-            let wr2 = w * r2;
-            let wr3 = w * r3;
-            let cols = [
-                PackedBabyBearNeon::from_fn(|i| [r0, r1, r2, r3][i]),
-                PackedBabyBearNeon::from_fn(|i| [wr3, r0, r1, r2][i]),
-                PackedBabyBearNeon::from_fn(|i| [wr2, wr3, r0, r1][i]),
-                PackedBabyBearNeon::from_fn(|i| [wr1, wr2, wr3, r0][i]),
-            ];
-            Self { cols }
+            let wr1: u32 = unsafe { std::mem::transmute(w * r1) };
+            let wr2: u32 = unsafe { std::mem::transmute(w * r2) };
+            let wr3: u32 = unsafe { std::mem::transmute(w * r3) };
+            let r0: u32 = unsafe { std::mem::transmute(r0) };
+            let r1: u32 = unsafe { std::mem::transmute(r1) };
+            let r2: u32 = unsafe { std::mem::transmute(r2) };
+            let r3: u32 = unsafe { std::mem::transmute(r3) };
+            unsafe {
+                let cols_lo = [
+                    vcreate_u32((r0 as u64) | ((r1 as u64) << 32)),
+                    vcreate_u32((wr3 as u64) | ((r0 as u64) << 32)),
+                    vcreate_u32((wr2 as u64) | ((wr3 as u64) << 32)),
+                    vcreate_u32((wr1 as u64) | ((wr2 as u64) << 32)),
+                ];
+                let cols_hi = [
+                    vcreate_u32((r2 as u64) | ((r3 as u64) << 32)),
+                    vcreate_u32((r1 as u64) | ((r2 as u64) << 32)),
+                    vcreate_u32((r0 as u64) | ((r1 as u64) << 32)),
+                    vcreate_u32((wr3 as u64) | ((r0 as u64) << 32)),
+                ];
+                Self { cols_lo, cols_hi }
+            }
         }
         #[cfg(not(all(target_arch = "aarch64", target_feature = "neon")))]
         {
@@ -1364,10 +1397,20 @@ impl BB4MulByConst {
     fn apply(&self, x: BB4) -> BB4 {
         #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
         {
-            let [x0, x1, x2, x3] = bb4_to_coeffs(x);
-            let lhs = [x0.into(), x1.into(), x2.into(), x3.into()];
-            let out = PackedBabyBearNeon::dot_product(&lhs, &self.cols).0;
-            BB4::new(out)
+            unsafe {
+                let x_raw: uint32x4_t = vld1q_u32(&x as *const BB4 as *const u32);
+                let x_lo = vget_low_u32(x_raw);
+                let x_hi = vget_high_u32(x_raw);
+                let mut lo = vmull_lane_u32::<0>(self.cols_lo[0], x_lo);
+                lo = vmlal_lane_u32::<1>(lo, self.cols_lo[1], x_lo);
+                lo = vmlal_lane_u32::<0>(lo, self.cols_lo[2], x_hi);
+                lo = vmlal_lane_u32::<1>(lo, self.cols_lo[3], x_hi);
+                let mut hi = vmull_lane_u32::<0>(self.cols_hi[0], x_lo);
+                hi = vmlal_lane_u32::<1>(hi, self.cols_hi[1], x_lo);
+                hi = vmlal_lane_u32::<0>(hi, self.cols_hi[2], x_hi);
+                hi = vmlal_lane_u32::<1>(hi, self.cols_hi[3], x_hi);
+                std::mem::transmute(bb_neon_monty_reduce(lo, hi))
+            }
         }
         #[cfg(not(all(target_arch = "aarch64", target_feature = "neon")))]
         {
@@ -1380,7 +1423,9 @@ struct BB5MulByConst {
     #[cfg(not(all(target_arch = "aarch64", target_feature = "neon")))]
     r: BB5,
     #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
-    rhs: [PackedBabyBearNeon; 5],
+    rhs_lo: [uint32x2_t; 5],
+    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+    rhs_hi: [uint32x2_t; 5],
     #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
     tail: [BabyBear; 5],
 }
@@ -1390,21 +1435,31 @@ impl BB5MulByConst {
     fn new(r: BB5) -> Self {
         #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
         {
-            let [r0, r1, r2, r3, r4] = bb5_to_coeffs(r);
+            let coeffs = bb5_to_coeffs(r);
             let w = BabyBear::from_u32(BB_W5 as u32);
-            let wr1 = w * r1;
-            let wr2 = w * r2;
-            let wr3 = w * r3;
-            let wr4 = w * r4;
-            let rhs = [
-                PackedBabyBearNeon::from_fn(|i| [r0, r1, r2, r3][i]),
-                PackedBabyBearNeon::from_fn(|i| [wr4, r0, r1, r2][i]),
-                PackedBabyBearNeon::from_fn(|i| [wr3, wr4, r0, r1][i]),
-                PackedBabyBearNeon::from_fn(|i| [wr2, wr3, wr4, r0][i]),
-                PackedBabyBearNeon::from_fn(|i| [wr1, wr2, wr3, wr4][i]),
-            ];
-            let tail = [r4, r3, r2, r1, r0];
-            Self { rhs, tail }
+            let wr1: u32 = unsafe { std::mem::transmute(w * coeffs[1]) };
+            let wr2: u32 = unsafe { std::mem::transmute(w * coeffs[2]) };
+            let wr3: u32 = unsafe { std::mem::transmute(w * coeffs[3]) };
+            let wr4: u32 = unsafe { std::mem::transmute(w * coeffs[4]) };
+            let [r0, r1, r2, r3, _] = bb5_to_limbs(r);
+            unsafe {
+                let rhs_lo = [
+                    vcreate_u32((r0 as u64) | ((r1 as u64) << 32)),
+                    vcreate_u32((wr4 as u64) | ((r0 as u64) << 32)),
+                    vcreate_u32((wr3 as u64) | ((wr4 as u64) << 32)),
+                    vcreate_u32((wr2 as u64) | ((wr3 as u64) << 32)),
+                    vcreate_u32((wr1 as u64) | ((wr2 as u64) << 32)),
+                ];
+                let rhs_hi = [
+                    vcreate_u32((r2 as u64) | ((r3 as u64) << 32)),
+                    vcreate_u32((r1 as u64) | ((r2 as u64) << 32)),
+                    vcreate_u32((r0 as u64) | ((r1 as u64) << 32)),
+                    vcreate_u32((wr4 as u64) | ((r0 as u64) << 32)),
+                    vcreate_u32((wr3 as u64) | ((wr4 as u64) << 32)),
+                ];
+                let tail = [coeffs[4], coeffs[3], coeffs[2], coeffs[1], coeffs[0]];
+                Self { rhs_lo, rhs_hi, tail }
+            }
         }
         #[cfg(not(all(target_arch = "aarch64", target_feature = "neon")))]
         {
@@ -1416,11 +1471,28 @@ impl BB5MulByConst {
     fn apply(&self, x: BB5) -> BB5 {
         #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
         {
-            let [x0, x1, x2, x3, x4] = bb5_to_coeffs(x);
-            let lhs = [x0.into(), x1.into(), x2.into(), x3.into(), x4.into()];
-            let dot = PackedBabyBearNeon::dot_product(&lhs, &self.rhs).0;
-            let tail = BabyBear::dot_product::<5>(&[x0, x1, x2, x3, x4], &self.tail);
-            BB5::new([dot[0], dot[1], dot[2], dot[3], tail])
+            unsafe {
+                let x_raw: uint32x4_t = vld1q_u32(&x as *const BB5 as *const u32);
+                let x_lo = vget_low_u32(x_raw);
+                let x_hi = vget_high_u32(x_raw);
+                let x4 = vdup_n_u32(*(&x as *const BB5 as *const u32).add(4));
+                let mut lo = vmull_lane_u32::<0>(self.rhs_lo[0], x_lo);
+                lo = vmlal_lane_u32::<1>(lo, self.rhs_lo[1], x_lo);
+                lo = vmlal_lane_u32::<0>(lo, self.rhs_lo[2], x_hi);
+                lo = vmlal_lane_u32::<1>(lo, self.rhs_lo[3], x_hi);
+                lo = vmlal_lane_u32::<0>(lo, self.rhs_lo[4], x4);
+                let mut hi = vmull_lane_u32::<0>(self.rhs_hi[0], x_lo);
+                hi = vmlal_lane_u32::<1>(hi, self.rhs_hi[1], x_lo);
+                hi = vmlal_lane_u32::<0>(hi, self.rhs_hi[2], x_hi);
+                hi = vmlal_lane_u32::<1>(hi, self.rhs_hi[3], x_hi);
+                hi = vmlal_lane_u32::<0>(hi, self.rhs_hi[4], x4);
+                let dot: [u32; 4] = std::mem::transmute(bb_neon_monty_reduce(lo, hi));
+                let x_coeffs = bb5_to_coeffs(x);
+                let tail: u32 = std::mem::transmute(
+                    BabyBear::dot_product::<5>(&x_coeffs, &self.tail),
+                );
+                bb5_from_limbs([dot[0], dot[1], dot[2], dot[3], tail])
+            }
         }
         #[cfg(not(all(target_arch = "aarch64", target_feature = "neon")))]
         {
@@ -1879,35 +1951,43 @@ fn bench_bn254(c: &mut Criterion) {
             let challenges = make_bn254(n_usize);
 
             group.bench_with_input(BenchmarkId::new("boolean", n), &n, |b, _| {
-                b.iter(|| {
-                    let mut f = f_orig.clone();
-                    let mut g = g_orig.clone();
-                    sumcheck_deg2_boolean(&mut f, &mut g, &challenges, BN254Fr::ZERO);
-                })
+                b.iter_batched(
+                    || (f_orig.clone(), g_orig.clone()),
+                    |(mut f, mut g)| {
+                        sumcheck_deg2_boolean(&mut f, &mut g, &challenges, BN254Fr::ZERO);
+                    },
+                    criterion::BatchSize::LargeInput,
+                )
             });
 
             group.bench_with_input(BenchmarkId::new("delayed", n), &n, |b, _| {
-                b.iter(|| {
-                    let mut f = f_orig.clone();
-                    let mut g = g_orig.clone();
-                    sumcheck_deg2_delayed_bn254(&mut f, &mut g, &challenges);
-                })
+                b.iter_batched(
+                    || (f_orig.clone(), g_orig.clone()),
+                    |(mut f, mut g)| {
+                        sumcheck_deg2_delayed_bn254(&mut f, &mut g, &challenges);
+                    },
+                    criterion::BatchSize::LargeInput,
+                )
             });
 
             group.bench_with_input(BenchmarkId::new("projective", n), &n, |b, _| {
-                b.iter(|| {
-                    let mut f = f_orig.clone();
-                    let mut g = g_orig.clone();
-                    sumcheck_deg2_projective(&mut f, &mut g, &challenges, BN254Fr::ZERO);
-                })
+                b.iter_batched(
+                    || (f_orig.clone(), g_orig.clone()),
+                    |(mut f, mut g)| {
+                        sumcheck_deg2_projective(&mut f, &mut g, &challenges, BN254Fr::ZERO);
+                    },
+                    criterion::BatchSize::LargeInput,
+                )
             });
 
             group.bench_with_input(BenchmarkId::new("proj_delayed", n), &n, |b, _| {
-                b.iter(|| {
-                    let mut f = f_orig.clone();
-                    let mut g = g_orig.clone();
-                    sumcheck_deg2_projective_delayed_bn254(&mut f, &mut g, &challenges);
-                })
+                b.iter_batched(
+                    || (f_orig.clone(), g_orig.clone()),
+                    |(mut f, mut g)| {
+                        sumcheck_deg2_projective_delayed_bn254(&mut f, &mut g, &challenges);
+                    },
+                    criterion::BatchSize::LargeInput,
+                )
             });
         }
         group.finish();
@@ -1924,43 +2004,51 @@ fn bench_bn254(c: &mut Criterion) {
             let suffix_eq = build_suffix_eq_tables(&eq_point, BN254Fr::from(1u64));
 
             group.bench_with_input(BenchmarkId::new("boolean", n), &n, |b, _| {
-                b.iter(|| {
-                    let mut f = f_orig.clone();
-                    let mut g = g_orig.clone();
-                    sumcheck_deg2_eq_gruen_boolean(
-                        &mut f, &mut g, &suffix_eq, &challenges, BN254Fr::ZERO,
-                    );
-                })
+                b.iter_batched(
+                    || (f_orig.clone(), g_orig.clone()),
+                    |(mut f, mut g)| {
+                        sumcheck_deg2_eq_gruen_boolean(
+                            &mut f, &mut g, &suffix_eq, &challenges, BN254Fr::ZERO,
+                        );
+                    },
+                    criterion::BatchSize::LargeInput,
+                )
             });
 
             group.bench_with_input(BenchmarkId::new("delayed", n), &n, |b, _| {
-                b.iter(|| {
-                    let mut f = f_orig.clone();
-                    let mut g = g_orig.clone();
-                    sumcheck_deg2_eq_delayed_bn254(
-                        &mut f, &mut g, &suffix_eq, &challenges,
-                    );
-                })
+                b.iter_batched(
+                    || (f_orig.clone(), g_orig.clone()),
+                    |(mut f, mut g)| {
+                        sumcheck_deg2_eq_delayed_bn254(
+                            &mut f, &mut g, &suffix_eq, &challenges,
+                        );
+                    },
+                    criterion::BatchSize::LargeInput,
+                )
             });
 
             group.bench_with_input(BenchmarkId::new("projective", n), &n, |b, _| {
-                b.iter(|| {
-                    let mut f = f_orig.clone();
-                    let mut g = g_orig.clone();
-                    sumcheck_deg2_eq_gruen_projective(
-                        &mut f, &mut g, &suffix_eq, &challenges, BN254Fr::ZERO,
-                    );
-                })
+                b.iter_batched(
+                    || (f_orig.clone(), g_orig.clone()),
+                    |(mut f, mut g)| {
+                        sumcheck_deg2_eq_gruen_projective(
+                            &mut f, &mut g, &suffix_eq, &challenges, BN254Fr::ZERO,
+                        );
+                    },
+                    criterion::BatchSize::LargeInput,
+                )
             });
 
             group.bench_with_input(BenchmarkId::new("proj_delayed", n), &n, |b, _| {
-                b.iter(|| {
-                    let mut f = f_orig.clone();
-                    let mut g = g_orig.clone();
-                    sumcheck_deg2_eq_projective_delayed_bn254(
-                        &mut f, &mut g, &suffix_eq, &challenges,
-                    );
-                })
+                b.iter_batched(
+                    || (f_orig.clone(), g_orig.clone()),
+                    |(mut f, mut g)| {
+                        sumcheck_deg2_eq_projective_delayed_bn254(
+                            &mut f, &mut g, &suffix_eq, &challenges,
+                        );
+                    },
+                    criterion::BatchSize::LargeInput,
+                )
             });
         }
         group.finish();
@@ -1981,35 +2069,43 @@ macro_rules! bench_bb_field {
                 let challenges = $make(n_usize);
 
                 group.bench_with_input(BenchmarkId::new("boolean", n), &n, |b, _| {
-                    b.iter(|| {
-                        let mut f = f_orig.clone();
-                        let mut g = g_orig.clone();
-                        sumcheck_deg2_boolean(&mut f, &mut g, &challenges, $zero);
-                    })
+                    b.iter_batched(
+                        || (f_orig.clone(), g_orig.clone()),
+                        |(mut f, mut g)| {
+                            sumcheck_deg2_boolean(&mut f, &mut g, &challenges, $zero);
+                        },
+                        criterion::BatchSize::LargeInput,
+                    )
                 });
 
                 group.bench_with_input(BenchmarkId::new("delayed", n), &n, |b, _| {
-                    b.iter(|| {
-                        let mut f = f_orig.clone();
-                        let mut g = g_orig.clone();
-                        $delayed_fn(&mut f, &mut g, &challenges);
-                    })
+                    b.iter_batched(
+                        || (f_orig.clone(), g_orig.clone()),
+                        |(mut f, mut g)| {
+                            $delayed_fn(&mut f, &mut g, &challenges);
+                        },
+                        criterion::BatchSize::LargeInput,
+                    )
                 });
 
                 group.bench_with_input(BenchmarkId::new("projective", n), &n, |b, _| {
-                    b.iter(|| {
-                        let mut f = f_orig.clone();
-                        let mut g = g_orig.clone();
-                        sumcheck_deg2_projective(&mut f, &mut g, &challenges, $zero);
-                    })
+                    b.iter_batched(
+                        || (f_orig.clone(), g_orig.clone()),
+                        |(mut f, mut g)| {
+                            sumcheck_deg2_projective(&mut f, &mut g, &challenges, $zero);
+                        },
+                        criterion::BatchSize::LargeInput,
+                    )
                 });
 
                 group.bench_with_input(BenchmarkId::new("proj_delayed", n), &n, |b, _| {
-                    b.iter(|| {
-                        let mut f = f_orig.clone();
-                        let mut g = g_orig.clone();
-                        $proj_delayed_fn(&mut f, &mut g, &challenges);
-                    })
+                    b.iter_batched(
+                        || (f_orig.clone(), g_orig.clone()),
+                        |(mut f, mut g)| {
+                            $proj_delayed_fn(&mut f, &mut g, &challenges);
+                        },
+                        criterion::BatchSize::LargeInput,
+                    )
                 });
             }
             group.finish();
@@ -2025,39 +2121,47 @@ macro_rules! bench_bb_field {
                 let suffix_eq = build_suffix_eq_tables(&eq_point, $one);
 
                 group.bench_with_input(BenchmarkId::new("boolean", n), &n, |b, _| {
-                    b.iter(|| {
-                        let mut f = f_orig.clone();
-                        let mut g = g_orig.clone();
-                        sumcheck_deg2_eq_gruen_boolean(
-                            &mut f, &mut g, &suffix_eq, &challenges, $zero,
-                        );
-                    })
+                    b.iter_batched(
+                        || (f_orig.clone(), g_orig.clone()),
+                        |(mut f, mut g)| {
+                            sumcheck_deg2_eq_gruen_boolean(
+                                &mut f, &mut g, &suffix_eq, &challenges, $zero,
+                            );
+                        },
+                        criterion::BatchSize::LargeInput,
+                    )
                 });
 
                 group.bench_with_input(BenchmarkId::new("delayed", n), &n, |b, _| {
-                    b.iter(|| {
-                        let mut f = f_orig.clone();
-                        let mut g = g_orig.clone();
-                        $delayed_eq_fn(&mut f, &mut g, &suffix_eq, &challenges);
-                    })
+                    b.iter_batched(
+                        || (f_orig.clone(), g_orig.clone()),
+                        |(mut f, mut g)| {
+                            $delayed_eq_fn(&mut f, &mut g, &suffix_eq, &challenges);
+                        },
+                        criterion::BatchSize::LargeInput,
+                    )
                 });
 
                 group.bench_with_input(BenchmarkId::new("projective", n), &n, |b, _| {
-                    b.iter(|| {
-                        let mut f = f_orig.clone();
-                        let mut g = g_orig.clone();
-                        sumcheck_deg2_eq_gruen_projective(
-                            &mut f, &mut g, &suffix_eq, &challenges, $zero,
-                        );
-                    })
+                    b.iter_batched(
+                        || (f_orig.clone(), g_orig.clone()),
+                        |(mut f, mut g)| {
+                            sumcheck_deg2_eq_gruen_projective(
+                                &mut f, &mut g, &suffix_eq, &challenges, $zero,
+                            );
+                        },
+                        criterion::BatchSize::LargeInput,
+                    )
                 });
 
                 group.bench_with_input(BenchmarkId::new("proj_delayed", n), &n, |b, _| {
-                    b.iter(|| {
-                        let mut f = f_orig.clone();
-                        let mut g = g_orig.clone();
-                        $proj_delayed_eq_fn(&mut f, &mut g, &suffix_eq, &challenges);
-                    })
+                    b.iter_batched(
+                        || (f_orig.clone(), g_orig.clone()),
+                        |(mut f, mut g)| {
+                            $proj_delayed_eq_fn(&mut f, &mut g, &suffix_eq, &challenges);
+                        },
+                        criterion::BatchSize::LargeInput,
+                    )
                 });
             }
             group.finish();
@@ -2096,60 +2200,72 @@ fn bench_fp128(c: &mut Criterion) {
             let challenges = make_fp128(n_usize);
 
             group.bench_with_input(BenchmarkId::new("boolean", n), &n, |b, _| {
-                b.iter(|| {
-                    let mut f = f_orig.clone();
-                    let mut g = g_orig.clone();
-                    sumcheck_deg2_boolean(&mut f, &mut g, &challenges, Fp128::ZERO);
-                })
+                b.iter_batched(
+                    || (f_orig.clone(), g_orig.clone()),
+                    |(mut f, mut g)| {
+                        sumcheck_deg2_boolean(&mut f, &mut g, &challenges, Fp128::ZERO);
+                    },
+                    criterion::BatchSize::LargeInput,
+                )
             });
 
             group.bench_with_input(BenchmarkId::new("delayed", n), &n, |b, _| {
-                b.iter(|| {
-                    let mut f = f_orig.clone();
-                    let mut g = g_orig.clone();
-                    sumcheck_deg2_delayed_fp128(&mut f, &mut g, &challenges);
-                })
+                b.iter_batched(
+                    || (f_orig.clone(), g_orig.clone()),
+                    |(mut f, mut g)| {
+                        sumcheck_deg2_delayed_fp128(&mut f, &mut g, &challenges);
+                    },
+                    criterion::BatchSize::LargeInput,
+                )
             });
 
             group.bench_with_input(BenchmarkId::new("projective", n), &n, |b, _| {
-                b.iter(|| {
-                    let mut f = f_orig.clone();
-                    let mut g = g_orig.clone();
-                    sumcheck_deg2_projective_fp128(&mut f, &mut g, &challenges, Fp128::ZERO);
-                })
+                b.iter_batched(
+                    || (f_orig.clone(), g_orig.clone()),
+                    |(mut f, mut g)| {
+                        sumcheck_deg2_projective_fp128(&mut f, &mut g, &challenges, Fp128::ZERO);
+                    },
+                    criterion::BatchSize::LargeInput,
+                )
             });
 
             group.bench_with_input(BenchmarkId::new("projective_1inf", n), &n, |b, _| {
-                b.iter(|| {
-                    let mut f = f_orig.clone();
-                    let mut g = g_orig.clone();
-                    sumcheck_deg2_projective_1inf_fp128(
-                        &mut f,
-                        &mut g,
-                        &challenges,
-                        Fp128::ZERO,
-                    );
-                })
+                b.iter_batched(
+                    || (f_orig.clone(), g_orig.clone()),
+                    |(mut f, mut g)| {
+                        sumcheck_deg2_projective_1inf_fp128(
+                            &mut f,
+                            &mut g,
+                            &challenges,
+                            Fp128::ZERO,
+                        );
+                    },
+                    criterion::BatchSize::LargeInput,
+                )
             });
 
             group.bench_with_input(BenchmarkId::new("proj_delayed", n), &n, |b, _| {
-                b.iter(|| {
-                    let mut f = f_orig.clone();
-                    let mut g = g_orig.clone();
-                    sumcheck_deg2_projective_delayed_fp128(&mut f, &mut g, &challenges);
-                })
+                b.iter_batched(
+                    || (f_orig.clone(), g_orig.clone()),
+                    |(mut f, mut g)| {
+                        sumcheck_deg2_projective_delayed_fp128(&mut f, &mut g, &challenges);
+                    },
+                    criterion::BatchSize::LargeInput,
+                )
             });
 
             group.bench_with_input(BenchmarkId::new("projective_1inf_delayed", n), &n, |b, _| {
-                b.iter(|| {
-                    let mut f = f_orig.clone();
-                    let mut g = g_orig.clone();
-                    sumcheck_deg2_projective_1inf_delayed_fp128(
-                        &mut f,
-                        &mut g,
-                        &challenges,
-                    );
-                })
+                b.iter_batched(
+                    || (f_orig.clone(), g_orig.clone()),
+                    |(mut f, mut g)| {
+                        sumcheck_deg2_projective_1inf_delayed_fp128(
+                            &mut f,
+                            &mut g,
+                            &challenges,
+                        );
+                    },
+                    criterion::BatchSize::LargeInput,
+                )
             });
         }
         group.finish();
@@ -2173,88 +2289,100 @@ fn bench_fp128(c: &mut Criterion) {
             );
 
             group.bench_with_input(BenchmarkId::new("boolean", n), &n, |b, _| {
-                b.iter(|| {
-                    let mut f = f_orig.clone();
-                    let mut g = g_orig.clone();
-                    sumcheck_deg2_eq_gruen_boolean(
-                        &mut f,
-                        &mut g,
-                        &suffix_eq,
-                        &challenges,
-                        Fp128::ZERO,
-                    );
-                })
+                b.iter_batched(
+                    || (f_orig.clone(), g_orig.clone()),
+                    |(mut f, mut g)| {
+                        sumcheck_deg2_eq_gruen_boolean(
+                            &mut f,
+                            &mut g,
+                            &suffix_eq,
+                            &challenges,
+                            Fp128::ZERO,
+                        );
+                    },
+                    criterion::BatchSize::LargeInput,
+                )
             });
 
             group.bench_with_input(BenchmarkId::new("delayed", n), &n, |b, _| {
-                b.iter(|| {
-                    let mut f = f_orig.clone();
-                    let mut g = g_orig.clone();
-                    sumcheck_deg2_eq_delayed_fp128(
-                        &mut f,
-                        &mut g,
-                        &suffix_eq,
-                        &challenges,
-                    );
-                })
+                b.iter_batched(
+                    || (f_orig.clone(), g_orig.clone()),
+                    |(mut f, mut g)| {
+                        sumcheck_deg2_eq_delayed_fp128(
+                            &mut f,
+                            &mut g,
+                            &suffix_eq,
+                            &challenges,
+                        );
+                    },
+                    criterion::BatchSize::LargeInput,
+                )
             });
 
             group.bench_with_input(BenchmarkId::new("projective", n), &n, |b, _| {
-                b.iter(|| {
-                    let mut f = f_orig.clone();
-                    let mut g = g_orig.clone();
-                    sumcheck_deg2_eq_gruen_projective_fp128(
-                        &mut f,
-                        &mut g,
-                        &suffix_eq,
-                        &challenges,
-                        Fp128::ZERO,
-                    );
-                })
+                b.iter_batched(
+                    || (f_orig.clone(), g_orig.clone()),
+                    |(mut f, mut g)| {
+                        sumcheck_deg2_eq_gruen_projective_fp128(
+                            &mut f,
+                            &mut g,
+                            &suffix_eq,
+                            &challenges,
+                            Fp128::ZERO,
+                        );
+                    },
+                    criterion::BatchSize::LargeInput,
+                )
             });
 
             group.bench_with_input(BenchmarkId::new("projective_1inf", n), &n, |b, _| {
-                b.iter(|| {
-                    let mut f = f_orig.clone();
-                    let mut g = g_orig.clone();
-                    sumcheck_deg2_eq_gruen_projective_1inf_fp128(
-                        &mut f,
-                        &mut g,
-                        &suffix_eq,
-                        &eq_point,
-                        &challenges,
-                        initial_claim_1inf,
-                        Fp128::ZERO,
-                    );
-                })
+                b.iter_batched(
+                    || (f_orig.clone(), g_orig.clone()),
+                    |(mut f, mut g)| {
+                        sumcheck_deg2_eq_gruen_projective_1inf_fp128(
+                            &mut f,
+                            &mut g,
+                            &suffix_eq,
+                            &eq_point,
+                            &challenges,
+                            initial_claim_1inf,
+                            Fp128::ZERO,
+                        );
+                    },
+                    criterion::BatchSize::LargeInput,
+                )
             });
 
             group.bench_with_input(BenchmarkId::new("proj_delayed", n), &n, |b, _| {
-                b.iter(|| {
-                    let mut f = f_orig.clone();
-                    let mut g = g_orig.clone();
-                    sumcheck_deg2_eq_projective_delayed_fp128(
-                        &mut f,
-                        &mut g,
-                        &suffix_eq,
-                        &challenges,
-                    );
-                })
+                b.iter_batched(
+                    || (f_orig.clone(), g_orig.clone()),
+                    |(mut f, mut g)| {
+                        sumcheck_deg2_eq_projective_delayed_fp128(
+                            &mut f,
+                            &mut g,
+                            &suffix_eq,
+                            &challenges,
+                        );
+                    },
+                    criterion::BatchSize::LargeInput,
+                )
             });
 
             group.bench_with_input(BenchmarkId::new("projective_1inf_delayed", n), &n, |b, _| {
-                b.iter(|| {
-                    let mut f = f_orig.clone();
-                    let mut g = g_orig.clone();
-                    sumcheck_deg2_eq_projective_1inf_delayed_fp128(
-                        &mut f,
-                        &mut g,
-                        &suffix_eq,
-                        &eq_point,
-                        &challenges,
-                        initial_claim_1inf,
-                    );
-                })
+                b.iter_batched(
+                    || (f_orig.clone(), g_orig.clone()),
+                    |(mut f, mut g)| {
+                        sumcheck_deg2_eq_projective_1inf_delayed_fp128(
+                            &mut f,
+                            &mut g,
+                            &suffix_eq,
+                            &eq_point,
+                            &challenges,
+                            initial_claim_1inf,
+                        );
+                    },
+                    criterion::BatchSize::LargeInput,
+                )
             });
         }
         group.finish();
@@ -2272,35 +2400,43 @@ fn bench_gf128(c: &mut Criterion) {
             let challenges = make_gf128(n_usize);
 
             group.bench_with_input(BenchmarkId::new("boolean", n), &n, |b, _| {
-                b.iter(|| {
-                    let mut f = f_orig.clone();
-                    let mut g = g_orig.clone();
-                    sumcheck_deg2_boolean(&mut f, &mut g, &challenges, GF128::ZERO);
-                })
+                b.iter_batched(
+                    || (f_orig.clone(), g_orig.clone()),
+                    |(mut f, mut g)| {
+                        sumcheck_deg2_boolean(&mut f, &mut g, &challenges, GF128::ZERO);
+                    },
+                    criterion::BatchSize::LargeInput,
+                )
             });
 
             group.bench_with_input(BenchmarkId::new("delayed", n), &n, |b, _| {
-                b.iter(|| {
-                    let mut f = f_orig.clone();
-                    let mut g = g_orig.clone();
-                    sumcheck_deg2_delayed_gf128(&mut f, &mut g, &challenges);
-                })
+                b.iter_batched(
+                    || (f_orig.clone(), g_orig.clone()),
+                    |(mut f, mut g)| {
+                        sumcheck_deg2_delayed_gf128(&mut f, &mut g, &challenges);
+                    },
+                    criterion::BatchSize::LargeInput,
+                )
             });
 
             group.bench_with_input(BenchmarkId::new("projective", n), &n, |b, _| {
-                b.iter(|| {
-                    let mut f = f_orig.clone();
-                    let mut g = g_orig.clone();
-                    sumcheck_deg2_projective(&mut f, &mut g, &challenges, GF128::ZERO);
-                })
+                b.iter_batched(
+                    || (f_orig.clone(), g_orig.clone()),
+                    |(mut f, mut g)| {
+                        sumcheck_deg2_projective(&mut f, &mut g, &challenges, GF128::ZERO);
+                    },
+                    criterion::BatchSize::LargeInput,
+                )
             });
 
             group.bench_with_input(BenchmarkId::new("proj_delayed", n), &n, |b, _| {
-                b.iter(|| {
-                    let mut f = f_orig.clone();
-                    let mut g = g_orig.clone();
-                    sumcheck_deg2_projective_delayed_gf128(&mut f, &mut g, &challenges);
-                })
+                b.iter_batched(
+                    || (f_orig.clone(), g_orig.clone()),
+                    |(mut f, mut g)| {
+                        sumcheck_deg2_projective_delayed_gf128(&mut f, &mut g, &challenges);
+                    },
+                    criterion::BatchSize::LargeInput,
+                )
             });
         }
         group.finish();
@@ -2317,43 +2453,51 @@ fn bench_gf128(c: &mut Criterion) {
             let suffix_eq = build_suffix_eq_tables(&eq_point, GF128::ONE);
 
             group.bench_with_input(BenchmarkId::new("boolean", n), &n, |b, _| {
-                b.iter(|| {
-                    let mut f = f_orig.clone();
-                    let mut g = g_orig.clone();
-                    sumcheck_deg2_eq_gruen_boolean(
-                        &mut f, &mut g, &suffix_eq, &challenges, GF128::ZERO,
-                    );
-                })
+                b.iter_batched(
+                    || (f_orig.clone(), g_orig.clone()),
+                    |(mut f, mut g)| {
+                        sumcheck_deg2_eq_gruen_boolean(
+                            &mut f, &mut g, &suffix_eq, &challenges, GF128::ZERO,
+                        );
+                    },
+                    criterion::BatchSize::LargeInput,
+                )
             });
 
             group.bench_with_input(BenchmarkId::new("delayed", n), &n, |b, _| {
-                b.iter(|| {
-                    let mut f = f_orig.clone();
-                    let mut g = g_orig.clone();
-                    sumcheck_deg2_eq_delayed_gf128(
-                        &mut f, &mut g, &suffix_eq, &challenges,
-                    );
-                })
+                b.iter_batched(
+                    || (f_orig.clone(), g_orig.clone()),
+                    |(mut f, mut g)| {
+                        sumcheck_deg2_eq_delayed_gf128(
+                            &mut f, &mut g, &suffix_eq, &challenges,
+                        );
+                    },
+                    criterion::BatchSize::LargeInput,
+                )
             });
 
             group.bench_with_input(BenchmarkId::new("projective", n), &n, |b, _| {
-                b.iter(|| {
-                    let mut f = f_orig.clone();
-                    let mut g = g_orig.clone();
-                    sumcheck_deg2_eq_gruen_projective(
-                        &mut f, &mut g, &suffix_eq, &challenges, GF128::ZERO,
-                    );
-                })
+                b.iter_batched(
+                    || (f_orig.clone(), g_orig.clone()),
+                    |(mut f, mut g)| {
+                        sumcheck_deg2_eq_gruen_projective(
+                            &mut f, &mut g, &suffix_eq, &challenges, GF128::ZERO,
+                        );
+                    },
+                    criterion::BatchSize::LargeInput,
+                )
             });
 
             group.bench_with_input(BenchmarkId::new("proj_delayed", n), &n, |b, _| {
-                b.iter(|| {
-                    let mut f = f_orig.clone();
-                    let mut g = g_orig.clone();
-                    sumcheck_deg2_eq_projective_delayed_gf128(
-                        &mut f, &mut g, &suffix_eq, &challenges,
-                    );
-                })
+                b.iter_batched(
+                    || (f_orig.clone(), g_orig.clone()),
+                    |(mut f, mut g)| {
+                        sumcheck_deg2_eq_projective_delayed_gf128(
+                            &mut f, &mut g, &suffix_eq, &challenges,
+                        );
+                    },
+                    criterion::BatchSize::LargeInput,
+                )
             });
         }
         group.finish();
