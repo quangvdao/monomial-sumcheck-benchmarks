@@ -29,12 +29,14 @@ Rust toolchain: `1.94.0` (pinned in `rust-toolchain.toml`).
 - Benchmark structure is reproducible across machines, but absolute timings depend on CPU, OS, and target architecture.
 - The paper numbers were collected on an Apple M4 Max (`aarch64-apple-darwin`), single-threaded, with thin LTO enabled.
 - The combined binding benchmark (`bench_combined` in `binding.rs`) follows Jolt's `bound_poly_var_top` layout: in-place binding on a contiguous 2N-element array. Each iteration restores the buffer via `memcpy`; reported times in the paper subtract the measured copy overhead.
+- Some hot kernels in `benches/sumcheck.rs` intentionally keep non-obvious source ordering, helper splitting, or duplicate reloads because those shapes produce measurably better LLVM codegen on the M4/NEON target. Re-benchmark those paths before simplifying them for style.
 
 ## Usage
 
 ```bash
 # Sanity check
 cargo check --benches
+cargo test --test bb5_packed_eq
 
 # Run all suites
 cargo bench --bench field_ops
@@ -44,6 +46,9 @@ cargo bench --bench sumcheck
 
 # Reproduce the paper's end-to-end sumcheck rows (n = 20)
 cargo bench --bench sumcheck -- 'sumcheck_deg2/.*/20|sumcheck_deg2_eq/.*/20'
+
+# Focus on the most codegen-sensitive degree-2 x eq rows while iterating
+cargo bench --bench sumcheck -- 'sumcheck_deg2_eq/(BB5|Fp128|GF128)/(boolean|projective|delayed|proj_delayed)/20'
 
 # Reproduce the combined binding table (Section 6.4)
 cargo bench --bench binding -- 'combined'
