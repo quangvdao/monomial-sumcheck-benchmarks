@@ -21,11 +21,15 @@ use hachi_pcs::{AdditiveGroup as HachiAdditiveGroup, CanonicalField, FieldCore, 
 use p3_baby_bear::BabyBear;
 #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
 use p3_baby_bear::PackedBabyBearNeon;
-use p3_field::extension::BinomialExtensionField;
+use p3_field::extension::{BinomialExtensionField, QuinticTrinomialExtensionField};
 use p3_field::{BasedVectorSpace, ExtensionField, PackedFieldExtension, PackedValue, PrimeCharacteristicRing};
+use p3_koala_bear::KoalaBear;
+#[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+use p3_koala_bear::PackedKoalaBearNeon;
 
 type BB4 = BinomialExtensionField<BabyBear, 4>;
 type BB5 = BinomialExtensionField<BabyBear, 5>;
+type KB5 = QuinticTrinomialExtensionField<KoalaBear>;
 type Fp128 = Prime128Offset275;
 
 #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
@@ -74,6 +78,15 @@ fn make_bb5(n: usize) -> Vec<BB5> {
         .collect()
 }
 
+fn make_kb5(n: usize) -> Vec<KB5> {
+    let raw = make_u64s(n * 5);
+    raw.chunks(5)
+        .map(|chunk| {
+            KB5::from_basis_coefficients_fn(|i| KoalaBear::from_u32(chunk[i] as u32))
+        })
+        .collect()
+}
+
 fn make_fp128(n: usize) -> Vec<Fp128> {
     let raw = make_u64s(n * 2);
     raw.chunks(2)
@@ -92,6 +105,19 @@ fn make_gf128(n: usize) -> Vec<GF128> {
             GF128::new(v)
         })
         .collect()
+}
+
+fn make_bn254_upper_limb_challenges(n: usize) -> (Vec<BN254Fr>, Vec<(u64, u64)>) {
+    let raw = make_u64s(n * 2);
+    let mut challenges = Vec::with_capacity(n);
+    let mut limbs = Vec::with_capacity(n);
+    for chunk in raw.chunks(2) {
+        let lo = chunk[0];
+        let hi = chunk[1] >> 3;
+        challenges.push(BN254Fr::new_unchecked(ark_ff::BigInt([0, 0, lo, hi])));
+        limbs.push((lo, hi));
+    }
+    (challenges, limbs)
 }
 
 // ===========================================================================
@@ -1618,6 +1644,350 @@ fn sumcheck_deg2_eq_projective_delayed_bn254(
     }
 }
 
+fn sumcheck_deg2_boolean_bn254_upper(
+    f: &mut Vec<BN254Fr>,
+    g: &mut Vec<BN254Fr>,
+    challenge_limbs: &[(u64, u64)],
+) {
+    for round in 0..challenge_limbs.len() {
+        let half = f.len() / 2;
+
+        let mut h0 = BN254Fr::ZERO;
+        let mut h1 = BN254Fr::ZERO;
+        let mut h_inf = BN254Fr::ZERO;
+
+        for j in 0..half {
+            let f0 = f[2 * j];
+            let f1 = f[2 * j + 1];
+            let g0 = g[2 * j];
+            let g1 = g[2 * j + 1];
+            let df = f1 - f0;
+            let dg = g1 - g0;
+
+            h0 += f0 * g0;
+            h1 += f1 * g1;
+            h_inf += df * dg;
+        }
+
+        black_box((h0, h1, h_inf));
+
+        let (r_lo, r_hi) = challenge_limbs[round];
+        for j in 0..half {
+            let f0 = f[2 * j];
+            let f1 = f[2 * j + 1];
+            let g0 = g[2 * j];
+            let g1 = g[2 * j + 1];
+
+            f[j] = f0 + (f1 - f0).mul_by_hi_2limbs(r_lo, r_hi);
+            g[j] = g0 + (g1 - g0).mul_by_hi_2limbs(r_lo, r_hi);
+        }
+
+        f.truncate(half);
+        g.truncate(half);
+    }
+}
+
+fn sumcheck_deg2_projective_bn254_upper(
+    f: &mut Vec<BN254Fr>,
+    g: &mut Vec<BN254Fr>,
+    challenge_limbs: &[(u64, u64)],
+) {
+    for round in 0..challenge_limbs.len() {
+        let half = f.len() / 2;
+
+        let mut h0 = BN254Fr::ZERO;
+        let mut h1 = BN254Fr::ZERO;
+        let mut h_inf = BN254Fr::ZERO;
+
+        for j in 0..half {
+            let f0 = f[2 * j];
+            let fi = f[2 * j + 1];
+            let g0 = g[2 * j];
+            let gi = g[2 * j + 1];
+
+            h0 += f0 * g0;
+            h_inf += fi * gi;
+            h1 += (f0 + fi) * (g0 + gi);
+        }
+
+        black_box((h0, h1, h_inf));
+
+        let (r_lo, r_hi) = challenge_limbs[round];
+        for j in 0..half {
+            let f0 = f[2 * j];
+            let fi = f[2 * j + 1];
+            let g0 = g[2 * j];
+            let gi = g[2 * j + 1];
+
+            f[j] = f0 + fi.mul_by_hi_2limbs(r_lo, r_hi);
+            g[j] = g0 + gi.mul_by_hi_2limbs(r_lo, r_hi);
+        }
+
+        f.truncate(half);
+        g.truncate(half);
+    }
+}
+
+fn sumcheck_deg2_eq_gruen_boolean_bn254_upper(
+    f: &mut Vec<BN254Fr>,
+    g: &mut Vec<BN254Fr>,
+    suffix_eq: &[Vec<BN254Fr>],
+    challenge_limbs: &[(u64, u64)],
+) {
+    let n = challenge_limbs.len();
+    for round in 0..n {
+        let half = f.len() / 2;
+        let eq_rest = &suffix_eq[round + 1];
+
+        let mut q1 = BN254Fr::ZERO;
+        let mut q_inf = BN254Fr::ZERO;
+
+        for j in 0..half {
+            let f0 = f[2 * j];
+            let f1 = f[2 * j + 1];
+            let g0 = g[2 * j];
+            let g1 = g[2 * j + 1];
+            let ew = eq_rest[j];
+            let df = f1 - f0;
+            let dg = g1 - g0;
+
+            q1 += f1 * g1 * ew;
+            q_inf += df * dg * ew;
+        }
+
+        black_box((q1, q_inf));
+
+        let (r_lo, r_hi) = challenge_limbs[round];
+        for j in 0..half {
+            let f0 = f[2 * j];
+            let f1 = f[2 * j + 1];
+            let g0 = g[2 * j];
+            let g1 = g[2 * j + 1];
+
+            f[j] = f0 + (f1 - f0).mul_by_hi_2limbs(r_lo, r_hi);
+            g[j] = g0 + (g1 - g0).mul_by_hi_2limbs(r_lo, r_hi);
+        }
+
+        f.truncate(half);
+        g.truncate(half);
+    }
+}
+
+fn sumcheck_deg2_eq_gruen_projective_bn254_upper(
+    f: &mut Vec<BN254Fr>,
+    g: &mut Vec<BN254Fr>,
+    suffix_eq: &[Vec<BN254Fr>],
+    challenge_limbs: &[(u64, u64)],
+) {
+    let n = challenge_limbs.len();
+    for round in 0..n {
+        let half = f.len() / 2;
+        let eq_rest = &suffix_eq[round + 1];
+
+        let mut q1 = BN254Fr::ZERO;
+        let mut q_inf = BN254Fr::ZERO;
+
+        for j in 0..half {
+            let f0 = f[2 * j];
+            let fi = f[2 * j + 1];
+            let g0 = g[2 * j];
+            let gi = g[2 * j + 1];
+            let ew = eq_rest[j];
+
+            q1 += (f0 + fi) * (g0 + gi) * ew;
+            q_inf += fi * gi * ew;
+        }
+
+        black_box((q1, q_inf));
+
+        let (r_lo, r_hi) = challenge_limbs[round];
+        for j in 0..half {
+            let f0 = f[2 * j];
+            let fi = f[2 * j + 1];
+            let g0 = g[2 * j];
+            let gi = g[2 * j + 1];
+
+            f[j] = f0 + fi.mul_by_hi_2limbs(r_lo, r_hi);
+            g[j] = g0 + gi.mul_by_hi_2limbs(r_lo, r_hi);
+        }
+
+        f.truncate(half);
+        g.truncate(half);
+    }
+}
+
+fn sumcheck_deg2_delayed_bn254_upper(
+    f: &mut Vec<BN254Fr>,
+    g: &mut Vec<BN254Fr>,
+    challenge_limbs: &[(u64, u64)],
+) {
+    for round in 0..challenge_limbs.len() {
+        let half = f.len() / 2;
+
+        let mut h0 = BN254Accum::zero();
+        let mut h1 = BN254Accum::zero();
+        let mut h_inf = BN254Accum::zero();
+
+        for j in 0..half {
+            let f0 = f[2 * j];
+            let f1 = f[2 * j + 1];
+            let g0 = g[2 * j];
+            let g1 = g[2 * j + 1];
+            let df = f1 - f0;
+            let dg = g1 - g0;
+
+            h0.fmadd(f0, g0);
+            h1.fmadd(f1, g1);
+            h_inf.fmadd(df, dg);
+        }
+
+        black_box((h0.reduce(), h1.reduce(), h_inf.reduce()));
+
+        let (r_lo, r_hi) = challenge_limbs[round];
+        for j in 0..half {
+            let f0 = f[2 * j];
+            let f1 = f[2 * j + 1];
+            let g0 = g[2 * j];
+            let g1 = g[2 * j + 1];
+
+            f[j] = f0 + (f1 - f0).mul_by_hi_2limbs(r_lo, r_hi);
+            g[j] = g0 + (g1 - g0).mul_by_hi_2limbs(r_lo, r_hi);
+        }
+        f.truncate(half);
+        g.truncate(half);
+    }
+}
+
+fn sumcheck_deg2_projective_delayed_bn254_upper(
+    f: &mut Vec<BN254Fr>,
+    g: &mut Vec<BN254Fr>,
+    challenge_limbs: &[(u64, u64)],
+) {
+    for round in 0..challenge_limbs.len() {
+        let half = f.len() / 2;
+
+        let mut h0 = BN254Accum::zero();
+        let mut h1 = BN254Accum::zero();
+        let mut h_inf = BN254Accum::zero();
+
+        for j in 0..half {
+            let f0 = f[2 * j];
+            let fi = f[2 * j + 1];
+            let g0 = g[2 * j];
+            let gi = g[2 * j + 1];
+
+            let sf = f0 + fi;
+            let sg = g0 + gi;
+            h0.fmadd(f0, g0);
+            h1.fmadd(sf, sg);
+            h_inf.fmadd(fi, gi);
+        }
+
+        black_box((h0.reduce(), h1.reduce(), h_inf.reduce()));
+
+        let (r_lo, r_hi) = challenge_limbs[round];
+        for j in 0..half {
+            let f0 = f[2 * j];
+            let fi = f[2 * j + 1];
+            let g0 = g[2 * j];
+            let gi = g[2 * j + 1];
+
+            f[j] = f0 + fi.mul_by_hi_2limbs(r_lo, r_hi);
+            g[j] = g0 + gi.mul_by_hi_2limbs(r_lo, r_hi);
+        }
+        f.truncate(half);
+        g.truncate(half);
+    }
+}
+
+fn sumcheck_deg2_eq_delayed_bn254_upper(
+    f: &mut Vec<BN254Fr>,
+    g: &mut Vec<BN254Fr>,
+    suffix_eq: &[Vec<BN254Fr>],
+    challenge_limbs: &[(u64, u64)],
+) {
+    let n = challenge_limbs.len();
+    for round in 0..n {
+        let half = f.len() / 2;
+        let eq_rest = &suffix_eq[round + 1];
+
+        let mut q1 = BN254Accum::zero();
+        let mut q_inf = BN254Accum::zero();
+
+        for j in 0..half {
+            let f0 = f[2 * j];
+            let f1 = f[2 * j + 1];
+            let g0 = g[2 * j];
+            let g1 = g[2 * j + 1];
+            let ew = eq_rest[j];
+            let df = f1 - f0;
+            let dg = g1 - g0;
+
+            q1.fmadd(f1 * g1, ew);
+            q_inf.fmadd(df * dg, ew);
+        }
+
+        black_box((q1.reduce(), q_inf.reduce()));
+
+        let (r_lo, r_hi) = challenge_limbs[round];
+        for j in 0..half {
+            let f0 = f[2 * j];
+            let f1 = f[2 * j + 1];
+            let g0 = g[2 * j];
+            let g1 = g[2 * j + 1];
+
+            f[j] = f0 + (f1 - f0).mul_by_hi_2limbs(r_lo, r_hi);
+            g[j] = g0 + (g1 - g0).mul_by_hi_2limbs(r_lo, r_hi);
+        }
+        f.truncate(half);
+        g.truncate(half);
+    }
+}
+
+fn sumcheck_deg2_eq_projective_delayed_bn254_upper(
+    f: &mut Vec<BN254Fr>,
+    g: &mut Vec<BN254Fr>,
+    suffix_eq: &[Vec<BN254Fr>],
+    challenge_limbs: &[(u64, u64)],
+) {
+    let n = challenge_limbs.len();
+    for round in 0..n {
+        let half = f.len() / 2;
+        let eq_rest = &suffix_eq[round + 1];
+
+        let mut q1 = BN254Accum::zero();
+        let mut q_inf = BN254Accum::zero();
+
+        for j in 0..half {
+            let f0 = f[2 * j];
+            let fi = f[2 * j + 1];
+            let g0 = g[2 * j];
+            let gi = g[2 * j + 1];
+            let ew = eq_rest[j];
+
+            let sf = f0 + fi;
+            let sg = g0 + gi;
+            q1.fmadd(sf * sg, ew);
+            q_inf.fmadd(fi * gi, ew);
+        }
+
+        black_box((q1.reduce(), q_inf.reduce()));
+
+        let (r_lo, r_hi) = challenge_limbs[round];
+        for j in 0..half {
+            let f0 = f[2 * j];
+            let fi = f[2 * j + 1];
+            let g0 = g[2 * j];
+            let gi = g[2 * j + 1];
+
+            f[j] = f0 + fi.mul_by_hi_2limbs(r_lo, r_hi);
+            g[j] = g0 + gi.mul_by_hi_2limbs(r_lo, r_hi);
+        }
+        f.truncate(half);
+        g.truncate(half);
+    }
+}
+
 fn sumcheck_deg2_eq_projective_delayed_fp128(
     f: &mut Vec<Fp128>,
     g: &mut Vec<Fp128>,
@@ -2038,6 +2408,155 @@ impl BB5MulByConst {
     }
 }
 
+// ===========================================================================
+// KoalaBear quintic extension delayed reduction accumulator
+// Uses the X^5 + X^2 - 1 relation directly, so each output coefficient is a
+// signed linear combination of the 25 base-field products.
+// ===========================================================================
+
+const KB_PRIME: u64 = 0x7f000001;
+const KB_MONTY_MU: u64 = 0x81000001;
+const KB_MONTY_INV: u64 = KB_PRIME - ((KB_PRIME.wrapping_mul(KB_MONTY_MU) - 1) >> 32);
+
+#[inline(always)]
+fn kb_monty_reduce_i128(x: i128) -> u32 {
+    let x = x.rem_euclid(KB_PRIME as i128) as u128;
+    ((x.wrapping_mul(KB_MONTY_INV as u128)) % (KB_PRIME as u128)) as u32
+}
+
+#[inline(always)]
+fn kb5_to_limbs(x: KB5) -> [u32; 5] {
+    const _: () = assert!(std::mem::size_of::<KB5>() == std::mem::size_of::<[u32; 5]>());
+    unsafe { std::mem::transmute(x) }
+}
+
+#[inline(always)]
+fn kb5_to_coeffs(x: KB5) -> [KoalaBear; 5] {
+    const _: () = assert!(std::mem::size_of::<KB5>() == std::mem::size_of::<[KoalaBear; 5]>());
+    unsafe { std::mem::transmute(x) }
+}
+
+#[inline(always)]
+fn kb5_from_limbs(limbs: [u32; 5]) -> KB5 {
+    unsafe { std::mem::transmute(limbs) }
+}
+
+struct KB5Accum {
+    c: [u128; 9],
+}
+
+impl KB5Accum {
+    #[inline(always)]
+    fn zero() -> Self {
+        Self { c: [0u128; 9] }
+    }
+
+    #[inline(always)]
+    fn fmadd(&mut self, a: KB5, b: KB5) {
+        let a = kb5_to_limbs(a);
+        let b = kb5_to_limbs(b);
+        let (a0, a1, a2, a3, a4) = (
+            a[0] as u64,
+            a[1] as u64,
+            a[2] as u64,
+            a[3] as u64,
+            a[4] as u64,
+        );
+        let (b0, b1, b2, b3, b4) = (
+            b[0] as u64,
+            b[1] as u64,
+            b[2] as u64,
+            b[3] as u64,
+            b[4] as u64,
+        );
+
+        self.c[0] += (a0 * b0) as u128;
+        self.c[1] += (a0 * b1 + a1 * b0) as u128;
+        self.c[2] += (a0 * b2 + a1 * b1 + a2 * b0) as u128;
+        self.c[3] += (a0 * b3 + a1 * b2 + a2 * b1 + a3 * b0) as u128;
+        self.c[4] += (a0 * b4 + a1 * b3 + a2 * b2 + a3 * b1) as u128;
+        self.c[4] += (a4 * b0) as u128;
+        self.c[5] += (a1 * b4 + a2 * b3 + a3 * b2 + a4 * b1) as u128;
+        self.c[6] += (a2 * b4 + a3 * b3 + a4 * b2) as u128;
+        self.c[7] += (a3 * b4 + a4 * b3) as u128;
+        self.c[8] += (a4 * b4) as u128;
+    }
+
+    fn reduce(self) -> KB5 {
+        let d0 = self.c[0] as i128 + self.c[5] as i128 - self.c[8] as i128;
+        let d1 = self.c[1] as i128 + self.c[6] as i128;
+        let d2 = self.c[2] as i128 - self.c[5] as i128 + self.c[7] as i128 + self.c[8] as i128;
+        let d3 = self.c[3] as i128 - self.c[6] as i128 + self.c[8] as i128;
+        let d4 = self.c[4] as i128 - self.c[7] as i128;
+        kb5_from_limbs([
+            kb_monty_reduce_i128(d0),
+            kb_monty_reduce_i128(d1),
+            kb_monty_reduce_i128(d2),
+            kb_monty_reduce_i128(d3),
+            kb_monty_reduce_i128(d4),
+        ])
+    }
+}
+
+// Match KoalaBear's packed quintic multiply once per round challenge so bind-step
+// multiplies can reuse the same NEON dot-product layout instead of rebuilding it.
+struct KB5MulByConst {
+    #[cfg(not(all(target_arch = "aarch64", target_feature = "neon")))]
+    r: KB5,
+    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+    rhs: [PackedKoalaBearNeon; 5],
+    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+    tail: [KoalaBear; 5],
+}
+
+impl KB5MulByConst {
+    #[inline(always)]
+    fn new(r: KB5) -> Self {
+        #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+        {
+            let b = kb5_to_coeffs(r);
+            let b0_minus_b3 = b[0] - b[3];
+            let b1_minus_b4 = b[1] - b[4];
+            let b4_minus_b2 = b[4] - b[2];
+            let b3_plus_b4_minus_b1 = b[3] - b1_minus_b4;
+            let rhs = [
+                unsafe { std::mem::transmute([b[0], b[1], b[2], b[3]]) },
+                unsafe { std::mem::transmute([b[4], b[0], b1_minus_b4, b[2]]) },
+                unsafe { std::mem::transmute([b[3], b[4], b0_minus_b3, b1_minus_b4]) },
+                unsafe { std::mem::transmute([b[2], b[3], b4_minus_b2, b0_minus_b3]) },
+                unsafe { std::mem::transmute([b1_minus_b4, b[2], b3_plus_b4_minus_b1, b4_minus_b2]) },
+            ];
+            let tail = [b[4], b[3], b[2], b1_minus_b4, b0_minus_b3];
+            Self { rhs, tail }
+        }
+        #[cfg(not(all(target_arch = "aarch64", target_feature = "neon")))]
+        {
+            Self { r }
+        }
+    }
+
+    #[inline(always)]
+    fn apply(&self, x: KB5) -> KB5 {
+        #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+        {
+            let x_coeffs = kb5_to_coeffs(x);
+            let lhs = x_coeffs.map(Into::<PackedKoalaBearNeon>::into);
+            let dot = PackedKoalaBearNeon::dot_product(&lhs, &self.rhs).0;
+            KB5::from_basis_coefficients_fn(|i| {
+                if i < 4 {
+                    dot[i]
+                } else {
+                    KoalaBear::dot_product::<5>(&x_coeffs, &self.tail)
+                }
+            })
+        }
+        #[cfg(not(all(target_arch = "aarch64", target_feature = "neon")))]
+        {
+            self.r * x
+        }
+    }
+}
+
 
 // --- Degree-2 sumcheck with delayed reduction for BB4/BB5 (Boolean basis) ---
 
@@ -2203,6 +2722,7 @@ macro_rules! delayed_sumcheck_fns {
 
 delayed_sumcheck_fns!(BB4, BB4Accum, BB4MulByConst, bb4);
 delayed_sumcheck_fns!(BB5, BB5Accum, BB5MulByConst, bb5);
+delayed_sumcheck_fns!(KB5, KB5Accum, KB5MulByConst, kb5);
 
 // ===========================================================================
 // GF(2^128) delayed reduction accumulator
@@ -2602,6 +3122,145 @@ fn bench_bn254(c: &mut Criterion) {
     }
 }
 
+fn bench_bn254_upper(c: &mut Criterion) {
+    let ns = [16u32, 20, 24];
+
+    {
+        let mut group = c.benchmark_group("sumcheck_deg2/BN254_upper");
+        for &n in &ns {
+            let n_usize = n as usize;
+            let f_orig = make_bn254(1usize << n_usize);
+            let g_orig = make_bn254(1usize << n_usize);
+            let (_, challenge_limbs) = make_bn254_upper_limb_challenges(n_usize);
+
+            let mut order = [0usize, 1, 2, 3];
+            order.shuffle(&mut rand::thread_rng());
+            for &idx in &order {
+                match idx {
+                    0 => { group.bench_with_input(BenchmarkId::new("boolean", n), &n, |b, _| {
+                        b.iter_batched(
+                            || (f_orig.clone(), g_orig.clone()),
+                            |(mut f, mut g)| {
+                                sumcheck_deg2_boolean_bn254_upper(&mut f, &mut g, &challenge_limbs);
+                            },
+                            criterion::BatchSize::LargeInput,
+                        )
+                    }); }
+                    1 => { group.bench_with_input(BenchmarkId::new("delayed", n), &n, |b, _| {
+                        b.iter_batched(
+                            || (f_orig.clone(), g_orig.clone()),
+                            |(mut f, mut g)| {
+                                sumcheck_deg2_delayed_bn254_upper(&mut f, &mut g, &challenge_limbs);
+                            },
+                            criterion::BatchSize::LargeInput,
+                        )
+                    }); }
+                    2 => { group.bench_with_input(BenchmarkId::new("projective", n), &n, |b, _| {
+                        b.iter_batched(
+                            || (f_orig.clone(), g_orig.clone()),
+                            |(mut f, mut g)| {
+                                sumcheck_deg2_projective_bn254_upper(&mut f, &mut g, &challenge_limbs);
+                            },
+                            criterion::BatchSize::LargeInput,
+                        )
+                    }); }
+                    3 => { group.bench_with_input(BenchmarkId::new("proj_delayed", n), &n, |b, _| {
+                        b.iter_batched(
+                            || (f_orig.clone(), g_orig.clone()),
+                            |(mut f, mut g)| {
+                                sumcheck_deg2_projective_delayed_bn254_upper(
+                                    &mut f,
+                                    &mut g,
+                                    &challenge_limbs,
+                                );
+                            },
+                            criterion::BatchSize::LargeInput,
+                        )
+                    }); }
+                    _ => unreachable!(),
+                }
+            }
+        }
+        group.finish();
+    }
+
+    {
+        let mut group = c.benchmark_group("sumcheck_deg2_eq/BN254_upper");
+        for &n in &ns {
+            let n_usize = n as usize;
+            let f_orig = make_bn254(1usize << n_usize);
+            let g_orig = make_bn254(1usize << n_usize);
+            let (eq_point, challenge_limbs) = make_bn254_upper_limb_challenges(n_usize);
+            let suffix_eq = build_suffix_eq_tables(&eq_point, BN254Fr::from(1u64));
+
+            let mut order = [0usize, 1, 2, 3];
+            order.shuffle(&mut rand::thread_rng());
+            for &idx in &order {
+                match idx {
+                    0 => { group.bench_with_input(BenchmarkId::new("boolean", n), &n, |b, _| {
+                        b.iter_batched(
+                            || (f_orig.clone(), g_orig.clone()),
+                            |(mut f, mut g)| {
+                                sumcheck_deg2_eq_gruen_boolean_bn254_upper(
+                                    &mut f,
+                                    &mut g,
+                                    &suffix_eq,
+                                    &challenge_limbs,
+                                );
+                            },
+                            criterion::BatchSize::LargeInput,
+                        )
+                    }); }
+                    1 => { group.bench_with_input(BenchmarkId::new("delayed", n), &n, |b, _| {
+                        b.iter_batched(
+                            || (f_orig.clone(), g_orig.clone()),
+                            |(mut f, mut g)| {
+                                sumcheck_deg2_eq_delayed_bn254_upper(
+                                    &mut f,
+                                    &mut g,
+                                    &suffix_eq,
+                                    &challenge_limbs,
+                                );
+                            },
+                            criterion::BatchSize::LargeInput,
+                        )
+                    }); }
+                    2 => { group.bench_with_input(BenchmarkId::new("projective", n), &n, |b, _| {
+                        b.iter_batched(
+                            || (f_orig.clone(), g_orig.clone()),
+                            |(mut f, mut g)| {
+                                sumcheck_deg2_eq_gruen_projective_bn254_upper(
+                                    &mut f,
+                                    &mut g,
+                                    &suffix_eq,
+                                    &challenge_limbs,
+                                );
+                            },
+                            criterion::BatchSize::LargeInput,
+                        )
+                    }); }
+                    3 => { group.bench_with_input(BenchmarkId::new("proj_delayed", n), &n, |b, _| {
+                        b.iter_batched(
+                            || (f_orig.clone(), g_orig.clone()),
+                            |(mut f, mut g)| {
+                                sumcheck_deg2_eq_projective_delayed_bn254_upper(
+                                    &mut f,
+                                    &mut g,
+                                    &suffix_eq,
+                                    &challenge_limbs,
+                                );
+                            },
+                            criterion::BatchSize::LargeInput,
+                        )
+                    }); }
+                    _ => unreachable!(),
+                }
+            }
+        }
+        group.finish();
+    }
+}
+
 macro_rules! bench_bb_field {
     ($field_label:expr, $field:ty, $make:ident, $zero:expr, $one:expr,
      $delayed_fn:ident, $delayed_eq_fn:ident,
@@ -2743,6 +3402,17 @@ fn bench_bb5(c: &mut Criterion) {
         sumcheck_deg2_delayed_bb5, sumcheck_deg2_eq_delayed_bb5_packed,
         sumcheck_deg2_projective_delayed_bb5, sumcheck_deg2_eq_projective_delayed_bb5_packed,
         sumcheck_deg2_eq_gruen_boolean_bb5, sumcheck_deg2_eq_gruen_projective_bb5,
+        ns, c
+    );
+}
+
+fn bench_kb5(c: &mut Criterion) {
+    let ns = [16u32, 20];
+    bench_bb_field!(
+        "KB5", KB5, make_kb5, KB5::ZERO, KB5::ONE,
+        sumcheck_deg2_delayed_kb5, sumcheck_deg2_eq_delayed_kb5,
+        sumcheck_deg2_projective_delayed_kb5, sumcheck_deg2_eq_projective_delayed_kb5,
+        sumcheck_deg2_eq_gruen_boolean, sumcheck_deg2_eq_gruen_projective,
         ns, c
     );
 }
@@ -3047,6 +3717,6 @@ criterion_group! {
     config = Criterion::default()
         .warm_up_time(Duration::from_secs(5))
         .measurement_time(Duration::from_secs(10));
-    targets = bench_bn254, bench_bb4, bench_bb5, bench_fp128, bench_gf128
+    targets = bench_bn254, bench_bn254_upper, bench_bb4, bench_bb5, bench_kb5, bench_fp128, bench_gf128
 }
 criterion_main!(benches);

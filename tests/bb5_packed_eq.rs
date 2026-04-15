@@ -185,4 +185,237 @@ mod sumcheck_impl {
         assert_eq!(f_packed, f_generic);
         assert_eq!(g_packed, g_generic);
     }
+
+    #[test]
+    fn bn254_upper_boolean_paths_match_standard() {
+        let n = 6usize;
+        let f_orig = make_bn254(1usize << n);
+        let g_orig = make_bn254(1usize << n);
+        let (challenges, challenge_limbs) = make_bn254_upper_limb_challenges(n);
+
+        let mut f_generic = f_orig.clone();
+        let mut g_generic = g_orig.clone();
+        let mut f_upper = f_orig.clone();
+        let mut g_upper = g_orig.clone();
+        sumcheck_deg2_boolean(&mut f_generic, &mut g_generic, &challenges, BN254Fr::ZERO);
+        sumcheck_deg2_boolean_bn254_upper(&mut f_upper, &mut g_upper, &challenge_limbs);
+        assert_eq!(f_upper, f_generic);
+        assert_eq!(g_upper, g_generic);
+
+        let mut f_delayed = f_orig.clone();
+        let mut g_delayed = g_orig.clone();
+        let mut f_upper_delayed = f_orig;
+        let mut g_upper_delayed = g_orig;
+        sumcheck_deg2_delayed_bn254(&mut f_delayed, &mut g_delayed, &challenges);
+        sumcheck_deg2_delayed_bn254_upper(&mut f_upper_delayed, &mut g_upper_delayed, &challenge_limbs);
+        assert_eq!(f_upper_delayed, f_delayed);
+        assert_eq!(g_upper_delayed, g_delayed);
+    }
+
+    #[test]
+    fn bn254_upper_projective_paths_match_standard() {
+        let n = 6usize;
+        let f_orig = make_bn254(1usize << n);
+        let g_orig = make_bn254(1usize << n);
+        let (challenges, challenge_limbs) = make_bn254_upper_limb_challenges(n);
+
+        let mut f_generic = f_orig.clone();
+        let mut g_generic = g_orig.clone();
+        let mut f_upper = f_orig.clone();
+        let mut g_upper = g_orig.clone();
+        sumcheck_deg2_projective(&mut f_generic, &mut g_generic, &challenges, BN254Fr::ZERO);
+        sumcheck_deg2_projective_bn254_upper(&mut f_upper, &mut g_upper, &challenge_limbs);
+        assert_eq!(f_upper, f_generic);
+        assert_eq!(g_upper, g_generic);
+
+        let mut f_delayed = f_orig.clone();
+        let mut g_delayed = g_orig.clone();
+        let mut f_upper_delayed = f_orig;
+        let mut g_upper_delayed = g_orig;
+        sumcheck_deg2_projective_delayed_bn254(&mut f_delayed, &mut g_delayed, &challenges);
+        sumcheck_deg2_projective_delayed_bn254_upper(
+            &mut f_upper_delayed,
+            &mut g_upper_delayed,
+            &challenge_limbs,
+        );
+        assert_eq!(f_upper_delayed, f_delayed);
+        assert_eq!(g_upper_delayed, g_delayed);
+    }
+
+    #[test]
+    fn bn254_upper_boolean_eq_paths_match_standard() {
+        let n = 6usize;
+        let f_orig = make_bn254(1usize << n);
+        let g_orig = make_bn254(1usize << n);
+        let (eq_point, challenge_limbs) = make_bn254_upper_limb_challenges(n);
+        let challenges: Vec<_> = challenge_limbs
+            .iter()
+            .map(|&(lo, hi)| BN254Fr::new_unchecked(ark_ff::BigInt([0, 0, lo, hi])))
+            .collect();
+        let suffix_eq = build_suffix_eq_tables(&eq_point, BN254Fr::from(1u64));
+
+        let mut f_generic = f_orig.clone();
+        let mut g_generic = g_orig.clone();
+        let mut f_upper = f_orig.clone();
+        let mut g_upper = g_orig.clone();
+        sumcheck_deg2_eq_gruen_boolean(
+            &mut f_generic,
+            &mut g_generic,
+            &suffix_eq,
+            &challenges,
+            BN254Fr::ZERO,
+        );
+        sumcheck_deg2_eq_gruen_boolean_bn254_upper(
+            &mut f_upper,
+            &mut g_upper,
+            &suffix_eq,
+            &challenge_limbs,
+        );
+        assert_eq!(f_upper, f_generic);
+        assert_eq!(g_upper, g_generic);
+
+        let mut f_delayed = f_orig.clone();
+        let mut g_delayed = g_orig.clone();
+        let mut f_upper_delayed = f_orig;
+        let mut g_upper_delayed = g_orig;
+        sumcheck_deg2_eq_delayed_bn254(&mut f_delayed, &mut g_delayed, &suffix_eq, &challenges);
+        sumcheck_deg2_eq_delayed_bn254_upper(
+            &mut f_upper_delayed,
+            &mut g_upper_delayed,
+            &suffix_eq,
+            &challenge_limbs,
+        );
+        assert_eq!(f_upper_delayed, f_delayed);
+        assert_eq!(g_upper_delayed, g_delayed);
+    }
+
+    #[test]
+    fn bn254_upper_projective_eq_paths_match_standard() {
+        let n = 6usize;
+        let f_orig = make_bn254(1usize << n);
+        let g_orig = make_bn254(1usize << n);
+        let (eq_point, challenge_limbs) = make_bn254_upper_limb_challenges(n);
+        let challenges: Vec<_> = challenge_limbs
+            .iter()
+            .map(|&(lo, hi)| BN254Fr::new_unchecked(ark_ff::BigInt([0, 0, lo, hi])))
+            .collect();
+        let suffix_eq = build_suffix_eq_tables(&eq_point, BN254Fr::from(1u64));
+
+        let mut f_generic = f_orig.clone();
+        let mut g_generic = g_orig.clone();
+        let mut f_upper = f_orig.clone();
+        let mut g_upper = g_orig.clone();
+        sumcheck_deg2_eq_gruen_projective(
+            &mut f_generic,
+            &mut g_generic,
+            &suffix_eq,
+            &challenges,
+            BN254Fr::ZERO,
+        );
+        sumcheck_deg2_eq_gruen_projective_bn254_upper(
+            &mut f_upper,
+            &mut g_upper,
+            &suffix_eq,
+            &challenge_limbs,
+        );
+        assert_eq!(f_upper, f_generic);
+        assert_eq!(g_upper, g_generic);
+
+        let mut f_delayed = f_orig.clone();
+        let mut g_delayed = g_orig.clone();
+        let mut f_upper_delayed = f_orig;
+        let mut g_upper_delayed = g_orig;
+        sumcheck_deg2_eq_projective_delayed_bn254(
+            &mut f_delayed,
+            &mut g_delayed,
+            &suffix_eq,
+            &challenges,
+        );
+        sumcheck_deg2_eq_projective_delayed_bn254_upper(
+            &mut f_upper_delayed,
+            &mut g_upper_delayed,
+            &suffix_eq,
+            &challenge_limbs,
+        );
+        assert_eq!(f_upper_delayed, f_delayed);
+        assert_eq!(g_upper_delayed, g_delayed);
+    }
+
+    #[test]
+    fn kb5_delayed_boolean_paths_match_generic() {
+        let n = 6usize;
+        let f_orig = make_kb5(1usize << n);
+        let g_orig = make_kb5(1usize << n);
+        let challenges = make_kb5(n);
+
+        let mut f_generic = f_orig.clone();
+        let mut g_generic = g_orig.clone();
+        let mut f_delayed = f_orig.clone();
+        let mut g_delayed = g_orig.clone();
+        sumcheck_deg2_boolean(&mut f_generic, &mut g_generic, &challenges, KB5::ZERO);
+        sumcheck_deg2_delayed_kb5(&mut f_delayed, &mut g_delayed, &challenges);
+        assert_eq!(f_delayed, f_generic);
+        assert_eq!(g_delayed, g_generic);
+
+        let eq_point = make_kb5(n);
+        let suffix_eq = build_suffix_eq_tables(&eq_point, KB5::ONE);
+        let mut f_generic_eq = f_orig.clone();
+        let mut g_generic_eq = g_orig.clone();
+        let mut f_delayed_eq = f_orig;
+        let mut g_delayed_eq = g_orig;
+        sumcheck_deg2_eq_gruen_boolean(
+            &mut f_generic_eq,
+            &mut g_generic_eq,
+            &suffix_eq,
+            &challenges,
+            KB5::ZERO,
+        );
+        sumcheck_deg2_eq_delayed_kb5(
+            &mut f_delayed_eq,
+            &mut g_delayed_eq,
+            &suffix_eq,
+            &challenges,
+        );
+        assert_eq!(f_delayed_eq, f_generic_eq);
+        assert_eq!(g_delayed_eq, g_generic_eq);
+    }
+
+    #[test]
+    fn kb5_delayed_projective_paths_match_generic() {
+        let n = 6usize;
+        let f_orig = make_kb5(1usize << n);
+        let g_orig = make_kb5(1usize << n);
+        let challenges = make_kb5(n);
+
+        let mut f_generic = f_orig.clone();
+        let mut g_generic = g_orig.clone();
+        let mut f_delayed = f_orig.clone();
+        let mut g_delayed = g_orig.clone();
+        sumcheck_deg2_projective(&mut f_generic, &mut g_generic, &challenges, KB5::ZERO);
+        sumcheck_deg2_projective_delayed_kb5(&mut f_delayed, &mut g_delayed, &challenges);
+        assert_eq!(f_delayed, f_generic);
+        assert_eq!(g_delayed, g_generic);
+
+        let eq_point = make_kb5(n);
+        let suffix_eq = build_suffix_eq_tables(&eq_point, KB5::ONE);
+        let mut f_generic_eq = f_orig.clone();
+        let mut g_generic_eq = g_orig.clone();
+        let mut f_delayed_eq = f_orig;
+        let mut g_delayed_eq = g_orig;
+        sumcheck_deg2_eq_gruen_projective(
+            &mut f_generic_eq,
+            &mut g_generic_eq,
+            &suffix_eq,
+            &challenges,
+            KB5::ZERO,
+        );
+        sumcheck_deg2_eq_projective_delayed_kb5(
+            &mut f_delayed_eq,
+            &mut g_delayed_eq,
+            &suffix_eq,
+            &challenges,
+        );
+        assert_eq!(f_delayed_eq, f_generic_eq);
+        assert_eq!(g_delayed_eq, g_generic_eq);
+    }
 }
