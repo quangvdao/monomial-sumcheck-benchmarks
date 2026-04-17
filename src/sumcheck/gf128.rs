@@ -1,8 +1,17 @@
 use super::*;
 
-// Scalar fallback for non-aarch64 builds needs `Field::ZERO` from
-// `binius_field`. On aarch64 (macOS M-class) we use the NEON intrinsics
-// path below and never touch `GF128::ZERO`.
+// On aarch64 (macOS M-class) we drive a hand-rolled deferred-reduction
+// FMA accumulator using NEON `vmull_p64` (see `GF128Accum` below), so
+// we never touch `GF128::ZERO` and don't need `Field` in scope.
+//
+// On non-aarch64 (x86_64) we fall back to a simpler accumulator that
+// just calls `a * b` and accumulates into a `GF128`. With the repo's
+// `.cargo/config.toml` (`target-cpu=native`) that mul dispatches to
+// binius-field's `packed_ghash_128` / `packed_ghash_256` SIMD path
+// (PCLMULQDQ / VPCLMULQDQ-256), so this is *not* a u128 software
+// multiply, just one without the deferred-reduction trick the NEON
+// path uses. Without the build flag binius reverts to a portable
+// u128 scalar mul, which is ~5-10x slower; see `PARALLELISM.md`.
 #[cfg(not(target_arch = "aarch64"))]
 use binius_field::Field;
 
@@ -129,6 +138,98 @@ pub fn sumcheck_deg2_delayed_gf128(f: &mut Vec<GF128>, g: &mut Vec<GF128>, chall
         f.truncate(half);
         g.truncate(half);
     }
+}
+
+/// Same sum-check relation as [`sumcheck_deg2_delayed_gf128`], with
+/// bind-of-previous-round and reduce-of-current-round fused into one
+/// pass. Mirrors the jolt-cpp GPU `bind_eval_roundN_kernel` shape;
+/// see `docs/plans/sumcheck-cpu-platform.md` Phase 1 for the
+/// derivation and the Fp128 twin (`sumcheck_deg2_delayed_fp128_fused`)
+/// for the rationale.
+pub fn sumcheck_deg2_delayed_gf128_fused(
+    f: &mut Vec<GF128>,
+    g: &mut Vec<GF128>,
+    challenges: &[GF128],
+) {
+    let n_rounds = challenges.len();
+    if n_rounds == 0 {
+        return;
+    }
+
+    {
+        let half = f.len() / 2;
+        let mut h0 = GF128Accum::zero();
+        let mut h1 = GF128Accum::zero();
+        let mut h_inf = GF128Accum::zero();
+
+        for j in 0..half {
+            let f0 = f[2 * j];
+            let f1 = f[2 * j + 1];
+            let g0 = g[2 * j];
+            let g1 = g[2 * j + 1];
+
+            h0.fmadd(f0, g0);
+            h1.fmadd(f1, g1);
+            h_inf.fmadd(f1 - f0, g1 - g0);
+        }
+
+        black_box((h0.reduce(), h1.reduce(), h_inf.reduce()));
+    }
+
+    for r_idx in 1..n_rounds {
+        let r_prev = challenges[r_idx - 1];
+        let new_half = f.len() / 4;
+
+        let mut h0 = GF128Accum::zero();
+        let mut h1 = GF128Accum::zero();
+        let mut h_inf = GF128Accum::zero();
+
+        for j in 0..new_half {
+            let f00 = f[4 * j];
+            let f01 = f[4 * j + 1];
+            let f10 = f[4 * j + 2];
+            let f11 = f[4 * j + 3];
+            let g00 = g[4 * j];
+            let g01 = g[4 * j + 1];
+            let g10 = g[4 * j + 2];
+            let g11 = g[4 * j + 3];
+
+            let f0 = f00 + r_prev * (f01 - f00);
+            let f1 = f10 + r_prev * (f11 - f10);
+            let g0 = g00 + r_prev * (g01 - g00);
+            let g1 = g10 + r_prev * (g11 - g10);
+
+            // In-place write is safe: iteration j reads positions
+            // [4j, 4j+4) and writes [2j, 2j+2); 4j > 2j+1 for j >= 1,
+            // and for j = 0 both reads complete before either write.
+            f[2 * j] = f0;
+            f[2 * j + 1] = f1;
+            g[2 * j] = g0;
+            g[2 * j + 1] = g1;
+
+            h0.fmadd(f0, g0);
+            h1.fmadd(f1, g1);
+            h_inf.fmadd(f1 - f0, g1 - g0);
+        }
+
+        f.truncate(2 * new_half);
+        g.truncate(2 * new_half);
+
+        black_box((h0.reduce(), h1.reduce(), h_inf.reduce()));
+    }
+
+    let r_last = challenges[n_rounds - 1];
+    let half = f.len() / 2;
+    for j in 0..half {
+        let f0 = f[2 * j];
+        let f1 = f[2 * j + 1];
+        let g0 = g[2 * j];
+        let g1 = g[2 * j + 1];
+        f[j] = f0 + r_last * (f1 - f0);
+        g[j] = g0 + r_last * (g1 - g0);
+    }
+    f.truncate(half);
+    g.truncate(half);
 }
 
 pub fn sumcheck_deg2_eq_delayed_gf128(

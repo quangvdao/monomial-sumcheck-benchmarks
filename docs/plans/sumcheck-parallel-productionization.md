@@ -510,13 +510,33 @@ Deferred until a downstream caller needs them:
 These are open questions surfaced during design that don't block
 the plan but should be answered before Phase B ships.
 
-1. **x86-64 GF128 SIMD path.** Current `GF128Accum` has NEON
-   intrinsics for aarch64 and a scalar fallback for everything else.
-   On aragorn (Zen 5) the scalar path will be the bottleneck. Adding
-   a `pclmulqdq` / `vpclmulqdq` fallback under
-   `#[cfg(target_arch = "x86_64")]` would close most of the gap. Not
-   strictly part of the parallelism work but adjacent and worth
-   tracking. Owner: this repo, not the new crates.
+1. **x86-64 GF128 SIMD path.** *Phase B follow-up: mostly fixed by
+   build flag.* binius-field already ships PCLMULQDQ / VPCLMULQDQ /
+   AVX-512 VPCLMULQDQ paths gated on the `target_feature` cfgs. The
+   default `x86_64-unknown-linux-gnu` target doesn't enable any of
+   those, so we got a portable `u128` software multiply on aragorn.
+   Committing `.cargo/config.toml` with
+   `rustflags = ["-C", "target-cpu=native", "-C",
+   "target-feature=-avx512f"]` for `x86_64-unknown-linux-gnu` routes
+   binius through `packed_ghash_256` (VPCLMULQDQ-256) and gives us
+   ~5× per-mul (latency) / ~10× (throughput) on the
+   `field_ops::GF128_Ghash::*_mul` benches, and ~8.7× on sequential
+   GF128 sumcheck end-to-end (every `n` in the sweep). The
+   `-avx512f` is needed because `hachi-pcs` carries a
+   `#![feature(stdarch_x86_avx512)]` opt-in that errors on stable
+   when AVX-512 is in the target features; disabling AVX-512 gives
+   up the 4-wide path (`packed_ghash_512`) but keeps the 2-wide
+   (`packed_ghash_256`) which is still ~5-10× over scalar. See
+   `PARALLELISM.md` "Aragorn, Phase B follow-up: VPCLMULQDQ" for
+   the post-flag tables.
+
+   *Remaining work:* `src/sumcheck/gf128.rs` non-aarch64 `GF128Accum`
+   still calls `acc += a * b`, which pays a polynomial reduction per
+   multiply instead of folding it across the loop the way the
+   aarch64 NEON impl does. A hand-rolled x86 accumulator using
+   `_mm_clmulepi64_si128` + deferred Montgomery reduction would
+   stack another ~2-3× on top of the build-flag win. Tracked
+   separately; not on Phase B critical path.
 
 2. **AVX-512 Fp128 path.** Similar: `Fp128Accum` uses 4×u128
    limb arithmetic; AVX-512 can do a lot more per cycle. Adjacent;

@@ -351,9 +351,20 @@ a 16-core mesh than on M4's P-core cluster.
 
 GF128 is CPU-bound on a scalar `u128` software multiply path on
 aragorn (no `pclmulqdq` SIMD backend yet), so absolute GF128 numbers
-are ~10× slower than M4 Max NEON. That's a known gap tracked
-separately from parallelism work; the per-variant speedup columns
-still show how the parallel scheduler scales.
+in the table below are ~10× slower than M4 Max NEON. That's a
+known gap tracked separately from parallelism work; the per-variant
+speedup columns still show how the parallel scheduler scales.
+
+> **Update (Phase B follow-up, see below).** The "no PCLMULQDQ"
+> regime is now history. Adding `-C target-cpu=native -C
+> target-feature=-avx512f` to `RUSTFLAGS` (committed as
+> `.cargo/config.toml` in the repo) routes binius-field's GF(2^128)
+> multiply through `packed_ghash_256` (VPCLMULQDQ-256). Sequential
+> GF128 sumcheck drops ~8.7× across the whole sweep below; see
+> the **"Aragorn, Phase B follow-up: VPCLMULQDQ"** section near the
+> end of this doc for the post-flag table. The numbers in the
+> immediately-following sub-tables are the *pre-flag* baseline,
+> kept as historical reference.
 
 #### GF128 (aragorn, µs for n ≤ 14, ms for n ≥ 16)
 
@@ -483,6 +494,105 @@ Dispatch floor at pool size 32 on aragorn (for comparison):
 Rayon equivalents (same process, pool init'd): `rayon::scope` on 32
 threads costs 21.7 µs/dispatch and `par_iter` on 32 threads costs
 12.8 µs. The pinned pool is 40-300× cheaper per dispatch.
+
+## Aragorn, Phase B follow-up: VPCLMULQDQ unlocked via `target-cpu=native`
+
+Until now every aragorn GF128 number above was on the *portable
+`u128` software multiply* path inside `binius-field`, because Rust's
+default `x86_64-unknown-linux-gnu` target doesn't enable
+`target_feature = "pclmulqdq"`. binius's `arch/x86_64/packed_ghash_*`
+SIMD code paths are gated behind those `target_feature` cfgs and
+silently compiled out, so the GF(2^128) mul fell back to portable
+limb-wise polynomial arithmetic, which is ~10× slower than NEON
+`pmull` on M4 Max.
+
+Fix is one config file, zero code changes. We commit
+`.cargo/config.toml`:
+
+```toml
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "target-cpu=native", "-C", "target-feature=-avx512f"]
+```
+
+The `-avx512f` is necessary because `hachi-pcs` (our Fp128 source)
+gates a `#![feature(stdarch_x86_avx512)]` opt-in behind
+`target_feature = "avx512f"`, and `feature(...)` is forbidden on the
+stable channel even when the underlying intrinsics have stabilized.
+Disabling AVX-512 keeps hachi compiling and routes binius through
+its `packed_ghash_256` path (VPCLMULQDQ-256, 2 carryless muls per
+SIMD op) instead of `packed_ghash_512` (VPCLMULQDQ-512, 4 per op).
+Estimated cost of skipping AVX-512: ~2× peak GF128 mul throughput,
+which is much cheaper than maintaining a nightly toolchain.
+
+### Inner-loop validation: `field_ops` GF128 mul
+
+Pre/post-flag, same hardware (aragorn, Zen 5), same source tree:
+
+| benchmark         | pre-flag | post-flag | speedup  |
+|-------------------|----------|-----------|----------|
+| `lat_mul` (latency, 4096-mul chain) | 79.16 µs | 15.86 µs | **5.0×** |
+| `thr_mul` (throughput, 1024 ops, ILP-friendly) | 21.91 µs | 2.16 µs | **10.1×** |
+
+The throughput speedup is bigger because VPCLMULQDQ-256 packs two
+128-bit carryless multiplies per SIMD instruction, doubling the
+ILP-bound rate.
+
+### End-to-end: GF128 sumcheck on aragorn (post-flag)
+
+Same Criterion harness as the Phase B table above, just with the new
+`.cargo/config.toml`:
+
+| n  | seq      | par1_scope | par1_pariter | par3_persist | **par4_pinned** | par4 vs best rayon |
+|----|----------|------------|--------------|--------------|-----------------|--------------------|
+| 10 | 10.86 µs | 234 µs     | 243 µs       | 27.5 µs      | **6.42 µs**     | 4.3× faster        |
+| 12 | 43.4 µs  | 320 µs     | 302 µs       | 46.6 µs      | **9.80 µs**     | 4.7× faster        |
+| 14 | 174 µs   | 408 µs     | 378 µs       | 321 µs       | **47.3 µs**     | 6.8× faster        |
+| 16 | 697 µs   | 603 µs     | 614 µs       | 238 µs       | **145 µs**      | 1.6× faster        |
+| 18 | 2.81 ms  | 1.73 ms    | 1.94 ms      | 1.55 ms      | **1.35 ms**     | 1.15× faster       |
+| 20 | 11.3 ms  | 6.55 ms    | 7.34 ms      | 5.65 ms      | **5.62 ms**     | 1.005× faster      |
+
+Per-variant speedup vs the pre-flag Phase B numbers:
+
+| n  | seq    | par4_pinned | rayon (best) |
+|----|--------|-------------|--------------|
+| 10 | 8.7×   | 7.7×        | 1.6× (par3)  |
+| 12 | 8.7×   | 10.4×       | 4.8× (par3)  |
+| 14 | 8.7×   | 2.8×        | 0.7× (par3, regression noise) |
+| 16 | 8.7×   | 3.7×        | 2.9× (par3)  |
+| 18 | 8.7×   | 2.0×        | 2.3× (par3)  |
+| 20 | 8.7×   | 1.9×        | 2.2× (par3)  |
+
+Sequential GF128 sumcheck gets a clean ~8.7× win at every n,
+matching the per-mul speedup almost exactly (the inner loop is
+mul-dominated; everything else is in cache). Parallel speedup
+ranges from 1.9× at large n (memory-bandwidth bound, the SIMD mul
+no longer dominates) to 10× at small n (compute-bound, where the
+new mul throughput shines through).
+
+`par4_pinned` is still the fastest variant at every `(n)` post-flag,
+so the "always beat rayon at every scale" property is preserved.
+The crossover advantage *widens* at small n: `par4_pinned/12` now
+beats the best rayon variant by 4.7× (was 3.0×), and `par4_pinned/14`
+by 6.8× (was 1.7×).
+
+Fp128 is unchanged by the flag (it routes through `hachi-pcs`,
+which doesn't use binius's SIMD codepath): spot-checks at n=10
+(11.0 µs vs 11.0 µs) and n=20 (5.23 ms vs 5.27 ms) match the
+pre-flag table within Criterion noise.
+
+### Future optimization: hand-rolled x86 GF128Accum
+
+`src/sumcheck/gf128.rs` has two `GF128Accum` impls: an aarch64 NEON
+one that hand-rolls a deferred-reduction `vmull_p64` FMA chain, and
+a generic non-aarch64 one that just does `acc += a * b`. The latter
+now (post-flag) goes through binius's PCLMULQDQ path on x86_64, so
+it's not "scalar" anymore, but it still pays a modular-reduction
+cost on every multiply instead of folding it across the loop the way
+the NEON code does. Mirroring the aarch64 hand-rolled accumulator
+on x86 with `_mm_clmulepi64_si128` + deferred Montgomery reduction
+would likely give another ~2-3× on top of the 8.7× we just bought.
+That's a separate project; tracked under "future optimizations" in
+`docs/plans/sumcheck-parallel-productionization.md`.
 
 ## Detailed findings
 
