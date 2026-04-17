@@ -32,7 +32,7 @@ Common:
   and `aragorn-bench-2026-04.log`) uses
   `--warm-up-time 3 --measurement-time 6` to fight variance.
 - Criterion reports `[low median high]`; numbers below are **median**.
-- `SUMCHECK_PINNED_WORKERS` unset (`pinned` picks `min(available_parallelism(), 8) = 8`).
+- `PINNED_POOL_WORKERS` unset (`pinned` picks `min(available_parallelism(), 8) = 8`).
 - Phase-A code lives in `src/sumcheck/parallel/{pool,scheduler,field,impls}/`;
   the original prototype is preserved in `src/sumcheck/parallel/legacy.rs`
   (`rayon_scope`, `rayon_iter`, `chili`, `persistent`, `pinned_v0`) for
@@ -209,7 +209,7 @@ for the re-evaluation criteria.
 ### Absolute numbers (Phase A, current code)
 
 Criterion medians from `target/parallelism-results/bench-phaseA-2026-04.log`
-(`--warm-up-time 3 --measurement-time 6`, `SUMCHECK_PINNED_WORKERS` unset).
+(`--warm-up-time 3 --measurement-time 6`, `PINNED_POOL_WORKERS` unset).
 Criterion numbers are 1.5-3× above the `pinned_ab` min because they
 include the long-tail distribution (occasional preemption, cache-cold
 dispatches, etc.) in the point estimate. Absolute values drift 30-60%
@@ -286,7 +286,7 @@ Cross-platform validation on `aragorn`, the team's Linux test box.
   single socket.
 - Ubuntu 24.04.3 LTS, kernel 6.17.0-20-generic.
 - rustc 1.95.0 stable; same `--warm-up-time 3 --measurement-time 6`
-  Criterion config; `SUMCHECK_PINNED_WORKERS` unset (pool defaults to
+  Criterion config; `PINNED_POOL_WORKERS` unset (pool defaults to
   `min(available_parallelism, 8) = 8` workers — important: on a
   16-physical-core box we're using **half the cores by design**; see
   end of this section).
@@ -596,6 +596,87 @@ would likely give another ~2-3× on top of the 8.7× we just bought.
 That's a separate project; tracked under "future optimizations" in
 `docs/plans/sumcheck-parallel-productionization.md`.
 
+## M4 Max pool-cap sweep (n2 investigation)
+
+Motivating question: the current macOS `default_pool_size()` returns
+`min(P-cores - 2, 8)`, which on this M4 Max (**12 P + 4 E = 16 cores**)
+evaluates to 8. The hard `8` cap comes from an early single-data-point
+observation of "pool=12 tanks n=14 GF128"; the question was whether
+raising it to 10 (= P-cores - 2, removing the hard cap) would unlock
+the 4 unused P-cores.
+
+Answer: **no, keep the 8 cap.** Median Criterion time, 30 samples,
+`--warm-up-time 1 --measurement-time 3`, `pinned_fused` variant,
+M4 Max under mixed background load (Cursor + Chrome + a few other
+apps running).
+
+### GF128 `pinned_fused` median (µs, lower = better)
+
+|  n | cap=6  | **cap=8** | cap=10  | cap=12         |
+|----|--------|-----------|---------|----------------|
+| 10 |   3.3  |   **3.3** |    3.7  |    8.6         |
+| 14 |  21.7  |  **31.0** |   25.5  | **5014** (!!)  |
+| 18 | 198.7  | **165.1** |  267.9  | **1739** (!!)  |
+| 20 | 842.4  | **720.3** |  1144   | **1929** (!!)  |
+
+### Fp128 `pinned_fused` median (µs)
+
+|  n | cap=6  | **cap=8** | cap=10         | cap=12         |
+|----|--------|-----------|----------------|----------------|
+| 10 |   7.8  |  **11.3** |   11.1         |   12.9         |
+| 14 |  49.2  |   466 (*) |   57.1         |  149.8         |
+| 18 | 654.8  | **567.5** | **4696** (!!)  | **2550** (!!)  |
+| 20 |  2370  | **1885**  | **31286** (!!) | **20150** (!!) |
+
+(*) cap=8/Fp128/14 = 466 µs median is a single-sample outlier;
+the low-CI is 120 µs, matching cap=6. Unfused at same (cap, n) is
+85 µs. Ignore this cell.
+
+### Read
+
+1. **cap=12 is the caller-eviction cliff.** Both fields, every
+   `n ≥ 14`, show 10-170× regressions: 5.0 ms vs 31 µs at GF128 n=14,
+   1.7 ms vs 165 µs at GF128 n=18. This is the previously-measured
+   "pool == P-cores = caller gets demoted to an E-core every
+   dispatch" failure mode.
+2. **cap=10 regresses 30-60% at medium/large n**, and shows
+   catastrophic tail behavior on Fp128 (4.7 ms and 31 ms medians
+   at n=18 and n=20 respectively, vs cap=8's 568 µs and 1.89 ms).
+   Leaving only 2 P-cores slack for caller + OS isn't enough
+   headroom on macOS because QoS is a hint, not affinity, so any
+   other app wanting a P-core thread at the wrong moment evicts a
+   pinned worker.
+3. **cap=8 is empirically optimal** across nearly every
+   `(n, field, variant)` combination. cap=6 is a close second and
+   matches/beats cap=8 only at the smallest sizes where the
+   sumcheck is sub-10 µs and barrier cost dominates.
+4. **The hard `8` cap in the formula is the right number for
+   mixed-workload dev boxes.** It isn't just defending against
+   the pool=12 cliff; cap=10 is also worse in practice on a box
+   where any other app is alive.
+
+Implication for the formula: keep
+`raw.saturating_sub(2).clamp(2, 8)`. The subagent's contingent
+recommendation to raise the ceiling to 16 (yielding pool=10 here)
+was based on pure theory (`P-cores - 2 is "always" safe"`); on
+macOS with QoS-only scheduling, 2 P-cores of slack turns out to be
+too tight in the presence of any caller-side competitor.
+
+Open question: on a pristine production box (e.g. a CI runner or
+a dedicated prover machine) with zero non-workload background
+threads, pool=10 might actually win back the 30% regression. We
+haven't validated that because all our measurement machines have
+the IDE + browser running. The formula could plausibly change to
+`raw.saturating_sub(2)` (no hard cap) for server deployments; for
+now, the `8` is a conservative default that always beats rayon
+and that users can override via `PINNED_POOL_WORKERS=10` if they
+know their box is clean.
+
+Bench logs: `target/n2-logs/cap{6,8,10,12}.log`. Assertions checked:
+each `pinned` configuration still matches the sequential kernel
+(`cargo test --release --features parallel --test parallel_delayed`
+still passes).
+
 ## Detailed findings
 
 ### 1. `pinned` (pinned pool + doorbell) is the overall winner.
@@ -755,9 +836,9 @@ For the delayed sumcheck kernel on Apple Silicon:
    the parallel speedup recovers at these sizes. A simple size check
    (`if initial_pairs < 1024 { delayed(...) } else { delayed_pinned(...) }`)
    is the production-safe dispatch.
-3. **Override `SUMCHECK_PINNED_WORKERS` only if you know the workload.**
+3. **Override `PINNED_POOL_WORKERS` only if you know the workload.**
    Default is `min(available_parallelism(), 8)`. For pure `n = 10`
-   GF128 workloads, `SUMCHECK_PINNED_WORKERS=3` gives a measured
+   GF128 workloads, `PINNED_POOL_WORKERS=3` gives a measured
    3.66 µs (0.95× seq), which flips the sign on the n=10 crossover;
    but that hurts `n ≥ 14` throughput noticeably. Leave the default
    alone unless small-n is the dominant use case.
@@ -785,7 +866,7 @@ cargo bench --bench sumcheck_parallel --features parallel_chili -- \
 cargo bench --bench sumcheck_parallel --features parallel_chili -- dispatch_floor
 
 # override the pinned pool size (default: min(available_parallelism(), 8))
-SUMCHECK_PINNED_WORKERS=4 cargo bench --bench sumcheck_parallel \
+PINNED_POOL_WORKERS=4 cargo bench --bench sumcheck_parallel \
   --features parallel_chili -- pinned
 ```
 

@@ -263,9 +263,11 @@ extraction.
      - Crossover at n ≤ 10 for both fields (M4 was n = 12 / 10).
      - 8-worker cap leaves half of aragorn's 16 cores idle at
        n ∈ {18, 20}; `rayon_scope` (all-core rayon) beats us there.
-       Follow-up (Phase B): raise default pool cap to
-       `min(physical_cores, 16)` and add more steps to the D2
-       shrinkage table.
+       ✅ Addressed in Phase B (Linux default now
+       `available_parallelism()` = 32 on aragorn; macOS stays at 8
+       after empirical validation, see `PARALLELISM.md` "M4 Max
+       pool-cap sweep"). D2 schedule table extension remains
+       outstanding (`n3`).
 
 ### Acceptance criteria for Phase A
 
