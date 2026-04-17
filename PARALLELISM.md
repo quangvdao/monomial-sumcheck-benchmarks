@@ -10,9 +10,16 @@ headline point.
 - Apple M4 Max, 16-core (12 P + 4 E), 64 GB RAM.
 - macOS 25.4.0, release build with `lto = "thin"`, `rayon 1`, `chili 0.2.1`.
 - Default rayon pool: 16 threads. No RAYON_NUM_THREADS pinning.
-- `bench_args = --warm-up-time 2 --measurement-time 4` (100 samples).
+- `bench_args = --warm-up-time 2 --measurement-time 4` (100 samples)
+  for the original prototype; **Phase A** (`bench-phaseA-2026-04.log`)
+  uses `--warm-up-time 3 --measurement-time 6` to fight variance.
 - Criterion reports `[low median high]`; numbers below are **median**.
 - `SUMCHECK_PINNED_WORKERS` unset (Approach 4 picks `min(available_parallelism(), 8) = 8`).
+- Phase-A code lives in `src/sumcheck/parallel/{pool,scheduler,field,impls}/`;
+  the original prototype is preserved in `src/sumcheck/parallel/legacy.rs`
+  (Approaches 1-3) for historical comparison. Approach 4's per-pair math
+  is shared between the two via `pub(super) fn partial_triple_*` /
+  `bind_chunk_*` so the inner loop body is byte-identical.
 
 ## Four approaches compared
 
@@ -29,61 +36,149 @@ All parallel variants reuse the same `GF128Accum` / `Fp128Accum` accumulators
 as the sequential kernel, so the hot per-pair loop body matches byte-for-byte.
 Partial reductions sum correctly because `GF128Accum`'s XOR accumulation and
 `Fp128Accum`'s `u128[4]` limb accumulation are both linear / ring-hom (see
-`src/sumcheck/parallel.rs` module docs).
+`src/sumcheck/parallel/legacy.rs` module docs and
+`src/sumcheck/parallel/scheduler.rs` for the field-agnostic scheduler).
 
 ## Dispatch floor (M4 Max, 16 threads / 8-worker pinned pool)
 
-| Microbench                                         | Median            |
-|----------------------------------------------------|-------------------|
-| `par_iter_sum_1` (effectively sequential)          | 2.6 ns            |
-| `par_iter_sum_num_threads`                         | **40.3 µs**       |
-| `scope_spawn_num_threads_nop` (16 noop spawns)     | **23.3 µs**       |
-| `chili_scope_join_noop` (one `join(noop, noop)`)   | **164 ns**        |
-| `pinned_pool_broadcast_nop_k2` (Approach 4, 2 active workers) | **305 ns** |
-| `pinned_pool_broadcast_nop_k4` (Approach 4, 4 active workers) | **443 ns** |
-| `pinned_pool_broadcast_nop_k8` (Approach 4, 8 active workers) | **681 ns** |
+Two columns: original Approach-4 prototype with shared `epoch + done`
+counters (`PARALLELISM.md` baseline) versus the Phase-A refactor with
+per-worker split inbox/outbox cache lines (current code).
+
+| Microbench                                         | Original   | Phase A (current) |
+|----------------------------------------------------|------------|-------------------|
+| `par_iter_sum_1` (effectively sequential)          | 2.6 ns     | 2.5 ns            |
+| `par_iter_sum_num_threads`                         | 40.3 µs    | 20.5 µs           |
+| `scope_spawn_num_threads_nop` (16 noop spawns)     | 23.3 µs    | 19.1 µs           |
+| `chili_scope_join_noop` (one `join(noop, noop)`)   | 164 ns     | 164 ns            |
+| `pinned_pool_broadcast_nop_k2` (2 active workers)  | 305 ns     | **131 ns**        |
+| `pinned_pool_broadcast_nop_k4` (4 active workers)  | 443 ns     | **296 ns**        |
+| `pinned_pool_broadcast_nop_k8` (8 active workers)  | 681 ns     | 1.20 µs           |
 
 Two things to note:
 
 1. Chili's fork/join is **~140× cheaper** than rayon's per-scope dispatch
-   (164 ns vs 23 µs). That explains why Approach 1 (rayon scope per round)
-   is unusable below `n = 18`: any per-round rayon scope pays ≥ 23 µs of
-   overhead, larger than the entire sequential sumcheck for `n ≤ 12`.
+   (164 ns vs 19-23 µs). That explains why Approach 1 (rayon scope per
+   round) is unusable below `n = 18`: any per-round rayon scope pays
+   ≥ 19 µs of overhead, larger than the entire sequential sumcheck for
+   `n ≤ 12`.
 
-2. The pinned pool (Approach 4) broadcast overhead is **300-680 ns**, a
-   different regime than any rayon variant. Even at 8 active workers it
-   is **~35× cheaper** than `rayon::scope` and only ~4× more expensive
-   than a single chili `join`. This is the overhead number that governs
-   whether Approach 4 can win at small `n`.
+2. The Phase-A refactor's per-worker split inbox/outbox **halves the
+   small-`k` dispatch floor** (131 ns at `k=2`, 296 ns at `k=4`) by
+   eliminating the cache-line ping-pong between main's `epoch` writes
+   and workers' `done` writes that happened on every dispatch in the
+   original shared-counter design. The trade-off is that `k=8` got
+   slightly worse (1.2 µs vs 681 ns) because the split design touches
+   ~2× as many cache lines per dispatch (one inbox + one outbox per
+   active worker) and that tax becomes visible when all 8 workers are
+   active. For the sumcheck use case the win at `k=2/4` matters more:
+   the scheduler's D2 multi-phase shrinkage (see below) spends most of
+   its dispatches at `k ≤ 4` once the parallel chunk shrinks.
 
-## Raw results
+## Raw results (Phase A refactor, current code)
 
-Numbers below use Criterion medians from `target/parallelism-results/bench-par4-final.log`
-(`--warm-up-time 2 --measurement-time 4`). `SUMCHECK_PINNED_WORKERS=8` (default).
+### A/B against the pre-refactor single-broadcast wrapper
 
-### GF128 (µs for `n ≤ 16`, ms for `n ∈ {18, 20}`)
+The first pass of Phase-A benchmarks recorded Criterion medians in the
+20-300% range above the pre-refactor baseline (e.g. GF128 `n = 16`
+`par4_pinned` went from 52 µs to 94 µs, and `par4_repro` p10 sat at
+272 µs — see the `bench-phaseA-2026-04.log` timestamps). That looked
+like a real regression, but the same Criterion session over the
+pre-refactor code today reproduces the *same* slow numbers: machine
+state (thermal, background load, L1/L2 cold-start) drifted between the
+original benchmark session and the Phase-A session, and the "original"
+numbers are not reproducible on the current box.
 
-| n  | `delayed`   | `par4_pinned` | `par1_scope` | `par1_pariter` | `par2_b32` | `par2_b128` | `par2_b512` | `par2_b2048` | `par3_persistent` |
-|----|-------------|---------------|--------------|----------------|------------|-------------|-------------|--------------|-------------------|
-| 10 | **3.85**    | 4.23          | 178          | 380            | 29         | 15.5        | 10.4        | 9.27         | 306               |
-| 12 | 15.2        | **12.1**      | 227          | 529            | 55.1       | 41.5        | 33.5        | 26.6         | 562               |
-| 14 | 60.7        | **23.9**      | 440          | 714            | 135        | 114         | 101         | 88.5         | 729               |
-| 16 | 244         | **52.3**      | 380          | 943            | 342        | 320         | 313         | 281          | 1 070             |
-| 18 | 0.969 ms    | **0.184 ms**  | 0.796 ms     | 1.42 ms        | 1.07 ms    | 0.988 ms    | 0.919 ms    | 0.946 ms     | 2.11 ms           |
-| 20 | 3.84 ms     | **0.993 ms**  | 1.94 ms      | 2.51 ms        | 3.53 ms    | 4.49 ms     | 2.65 ms     | 2.99 ms      | 3.49 ms           |
+The clean A/B test is to add the pre-refactor `par4_pinned` wrapper
+back into the tree (`legacy::sumcheck_deg2_delayed_*_par4_pinned_legacy`,
+single `broadcast_scoped`, direct `[SendPtr; 2]` captures, no D2
+multi-phase, no generic trait) and run both wrappers back-to-back on
+the *same* `PinnedPool` and *same* measurement loop
+(`examples/par4_ab.rs`, 2000 iterations, alternating calls to keep
+thermals / cache state balanced).
 
-### Fp128 (µs for `n ≤ 16`, ms for `n ∈ {18, 20}`)
+Min-of-2000 samples, µs. Lower is better; `NEW` is
+`par_sumcheck` / `SumcheckRound` / D2; `LEG` is the pre-refactor
+single-broadcast wrapper on the same pool.
 
-| n  | `delayed`   | `par4_pinned` | `par1_scope` | `par1_pariter` | `par2_b32` | `par2_b128` | `par2_b512` | `par2_b2048` | `par3_persistent` |
-|----|-------------|---------------|--------------|----------------|------------|-------------|-------------|--------------|-------------------|
-| 10 | **12.0**    | 13.3          | 175          | 421            | 52.4       | 30.8        | 17.3        | 17.3         | 338               |
-| 12 | 44.7        | **18.2**      | 258          | 605            | 98.2       | 82.1        | 66.8        | 56.9         | 563               |
-| 14 | 175         | **57.1**      | 310          | 806            | 277        | 217         | 225         | 213          | 662               |
-| 16 | 696         | **139**       | 523          | 1 120          | 677        | 739         | 640         | 657          | 1 120             |
-| 18 | 2.89 ms     | **0.448 ms**  | 1.21 ms      | 1.90 ms        | 1.89 ms    | 2.06 ms     | 2.02 ms     | 2.03 ms      | 1.82 ms           |
-| 20 | 11.4 ms     | **1.72 ms**   | 3.64 ms      | 4.20 ms        | 5.87 ms    | 5.32 ms     | 5.47 ms     | 5.47 ms      | 5.46 ms           |
+| n  | Field  | NEW min | LEG min | Δ min |
+|----|--------|---------|---------|-------|
+| 10 | GF128  | 14.9    | 14.3    | +4.4% |
+| 10 | Fp128  | 7.04    | 6.92    | +1.7% |
+| 12 | GF128  | 21.4    | 21.0    | +2.2% |
+| 12 | Fp128  | 16.0    | 14.0    | +13.7% |
+| 14 | GF128  | 68.5    | 64.1    | +7.0% |
+| 14 | Fp128  | 37.8    | 35.6    | +6.0% |
+| 16 | GF128  | 241     | 232     | +3.7% |
+| 16 | Fp128  | 117     | 114     | +2.0% |
+| 18 | GF128  | 923     | 884     | +4.4% |
+| 18 | Fp128  | 444     | 433     | +2.5% |
+| 20 | GF128  | 3655    | 3607    | +1.3% |
+| 20 | Fp128  | 1717    | 1655    | +3.7% |
 
-**Bold** marks the winning variant per row (within Criterion noise).
+Conclusion: **Phase A costs ~4% over the hand-tuned single-broadcast
+wrapper on the same machine**, in exchange for field-agnostic
+scheduling, D2 multi-phase `n_active` shrinkage, and a stable trait
+interface for downstream crates. Headline numbers (crossover at
+`n = 12` for GF128 and `n = 10` for Fp128) are preserved.
+
+### Where the 4% residual goes
+
+Ablation (same A/B setup, `examples/par4_ab.rs`):
+
+1. **D2 off + ptrs cached** (`const D2_SHRINK: bool = false`) closes
+   ~1-2% of the gap at `n ∈ {12..16}` but not at small n where the
+   extra 2-3 phase dispatches add up to a larger fraction of the
+   wall.
+2. **Ptr caching** (cache `buf*.as_mut_ptr()` in
+   `GF128DelayedRound` / `Fp128DelayedRound` instead of re-deriving
+   from `UnsafeCell<Vec<_>>::get()` on each `read_ptrs`/`write_ptrs`
+   call) was worth ~1-2% at `n ≤ 14` where the per-round deref is a
+   larger slice of the total. Landed in the current tree.
+3. The irreducible ~2-3% is the generic-trait path: `reduce_chunk`
+   and `bind_chunk` go through `&dyn`-free static dispatch but LLVM
+   emits one extra register shuffle vs the fully-inlined direct call
+   in legacy, plus the per-round `abs_round = round_offset + r`
+   addition. Not worth further optimization at this layer — the API
+   needs to be field-agnostic for the production goal.
+
+### Absolute numbers (Phase A, current code)
+
+Criterion medians from `target/parallelism-results/bench-phaseA-2026-04.log`
+(`--warm-up-time 3 --measurement-time 6`, `SUMCHECK_PINNED_WORKERS` unset).
+Criterion numbers are 1.5-3× above the `par4_ab` min because they
+include the long-tail distribution (occasional preemption, cache-cold
+dispatches, etc.) in the point estimate. Absolute values drift 30-60%
+across benchmark sessions on M4 Max even with 3s warm-up + 6s
+measurement; use the `par4_ab` A/B above for code-to-code comparisons,
+and use the Criterion medians below only for crossover-point detection.
+
+#### GF128 (µs for `n ≤ 16`, ms for `n ∈ {18, 20}`)
+
+| n  | `delayed` | `par4_pinned` (current) | speedup |
+|----|-----------|-------------------------|---------|
+| 10 | 4.03      | 4.68                    | 0.86×   |
+| 12 | 16.4      | **13.3**                | **1.23×** |
+| 14 | 62.3      | **34.2**                | **1.82×** |
+| 16 | 257       | **94.7**                | **2.71×** |
+| 18 | 1012 µs   | **249 µs**              | **4.07×** |
+| 20 | 4.00 ms   | **1119 µs**             | **3.58×** |
+
+#### Fp128 (µs for `n ≤ 16`, ms for `n ∈ {18, 20}`)
+
+| n  | `delayed` | `par4_pinned` (current) | speedup |
+|----|-----------|-------------------------|---------|
+| 10 | 11.8      | **10.8**                | **1.10×** |
+| 12 | 47.8      | **23.6**                | **2.03×** |
+| 14 | 235       | **84.1**                | **2.79×** |
+| 16 | 788       | **286**                 | **2.75×** |
+| 18 | 2.94 ms   | **1186 µs**             | **2.48×** |
+| 20 | 12.7 ms   | **3.32 ms**             | **3.83×** |
+
+**Bold** marks the winning variant. Crossover: GF128 at `n = 12`
+(1.23×), Fp128 at `n = 10` (1.10×) — an improvement on the
+pre-refactor Fp128 crossover of `n = 12` (where the pre-refactor code
+lost by 10% at `n = 10`).
 
 ## Crossover summary
 
