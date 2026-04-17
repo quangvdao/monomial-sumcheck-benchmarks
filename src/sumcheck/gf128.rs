@@ -28,6 +28,45 @@ fn gf2_128_reduce_u128(mut t0: u128, t1: u128) -> u128 {
     t0
 }
 
+/// Compute `a + r * (b - a)` in GF(2^128) using raw NEON intrinsics
+/// and the local polynomial reducer, bypassing `binius_field::M128`'s
+/// trait impls (`From<u128>`, `BitXorAssign`, `Default`, ...). Those
+/// impls are individually trivial, but LLVM's inliner gives up on
+/// them inside the fused bind+reduce loop body (60+ `bl` calls per
+/// iteration, dozens of stack spills). This helper is small enough
+/// that `#[inline(always)]` always fires, so the fused loop stays
+/// branch-free and register-resident. See
+/// `docs/notes/fused-bind-eval-ab.md` for the full codegen analysis.
+#[cfg(target_arch = "aarch64")]
+#[inline(always)]
+pub(super) fn gf128_bind(a: GF128, b: GF128, r: GF128) -> GF128 {
+    unsafe {
+        let a_val = a.val();
+        let diff = a_val ^ b.val(); // sub == XOR in char 2
+        let d_lo = diff as u64;
+        let d_hi = (diff >> 64) as u64;
+        let r_val = r.val();
+        let r_lo = r_val as u64;
+        let r_hi = (r_val >> 64) as u64;
+
+        let t0: u128 = std::mem::transmute(vmull_p64(r_lo, d_lo));
+        let t1a: u128 = std::mem::transmute(vmull_p64(r_hi, d_lo));
+        let t1b: u128 = std::mem::transmute(vmull_p64(r_lo, d_hi));
+        let t2: u128 = std::mem::transmute(vmull_p64(r_hi, d_hi));
+        let mid = t1a ^ t1b;
+
+        let mid_reduced = gf2_128_reduce_u128(mid, t2);
+        let product = gf2_128_reduce_u128(t0, mid_reduced);
+        GF128::new(a_val ^ product)
+    }
+}
+
+#[cfg(not(target_arch = "aarch64"))]
+#[inline(always)]
+pub(super) fn gf128_bind(a: GF128, b: GF128, r: GF128) -> GF128 {
+    a + r * (b - a)
+}
+
 #[cfg(target_arch = "aarch64")]
 pub(super) struct GF128Accum {
     low: uint64x2_t,
@@ -194,10 +233,10 @@ pub fn sumcheck_deg2_delayed_gf128_fused(
             let g10 = g[4 * j + 2];
             let g11 = g[4 * j + 3];
 
-            let f0 = f00 + r_prev * (f01 - f00);
-            let f1 = f10 + r_prev * (f11 - f10);
-            let g0 = g00 + r_prev * (g01 - g00);
-            let g1 = g10 + r_prev * (g11 - g10);
+            let f0 = gf128_bind(f00, f01, r_prev);
+            let f1 = gf128_bind(f10, f11, r_prev);
+            let g0 = gf128_bind(g00, g01, r_prev);
+            let g1 = gf128_bind(g10, g11, r_prev);
 
             // In-place write is safe: iteration j reads positions
             // [4j, 4j+4) and writes [2j, 2j+2); 4j > 2j+1 for j >= 1,
@@ -221,12 +260,8 @@ pub fn sumcheck_deg2_delayed_gf128_fused(
     let r_last = challenges[n_rounds - 1];
     let half = f.len() / 2;
     for j in 0..half {
-        let f0 = f[2 * j];
-        let f1 = f[2 * j + 1];
-        let g0 = g[2 * j];
-        let g1 = g[2 * j + 1];
-        f[j] = f0 + r_last * (f1 - f0);
-        g[j] = g0 + r_last * (g1 - g0);
+        f[j] = gf128_bind(f[2 * j], f[2 * j + 1], r_last);
+        g[j] = gf128_bind(g[2 * j], g[2 * j + 1], r_last);
     }
     f.truncate(half);
     g.truncate(half);

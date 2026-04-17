@@ -52,8 +52,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use criterion::black_box;
 use rayon::prelude::*;
 
-use super::super::fp128::Fp128Accum;
-use super::super::gf128::GF128Accum;
+use super::super::fp128::{fp128_bind, Fp128Accum};
+use super::super::gf128::{gf128_bind, GF128Accum};
 use super::super::{Fp128, GF128};
 
 use binius_field::Field as _;
@@ -860,10 +860,10 @@ pub(super) unsafe fn bind_then_reduce_chunk_gf128(
             let g10 = *rg_prev.add(base_prev + 2);
             let g11 = *rg_prev.add(base_prev + 3);
 
-            let f0 = f00 + r_prev * (f01 - f00);
-            let f1 = f10 + r_prev * (f11 - f10);
-            let g0 = g00 + r_prev * (g01 - g00);
-            let g1 = g10 + r_prev * (g11 - g10);
+            let f0 = gf128_bind(f00, f01, r_prev);
+            let f1 = gf128_bind(f10, f11, r_prev);
+            let g0 = gf128_bind(g00, g01, r_prev);
+            let g1 = gf128_bind(g10, g11, r_prev);
 
             let base_cur = (lo + j) * 2;
             *wf.add(base_cur) = f0;
@@ -905,10 +905,10 @@ pub(super) unsafe fn bind_then_reduce_chunk_fp128(
             let g10 = *rg_prev.add(base_prev + 2);
             let g11 = *rg_prev.add(base_prev + 3);
 
-            let f0 = (f01 - f00).mul_add(r_prev, f00);
-            let f1 = (f11 - f10).mul_add(r_prev, f10);
-            let g0 = (g01 - g00).mul_add(r_prev, g00);
-            let g1 = (g11 - g10).mul_add(r_prev, g10);
+            let f0 = fp128_bind(f00, f01, r_prev);
+            let f1 = fp128_bind(f10, f11, r_prev);
+            let g0 = fp128_bind(g00, g01, r_prev);
+            let g1 = fp128_bind(g10, g11, r_prev);
 
             let base_cur = (lo + j) * 2;
             *wf.add(base_cur) = f0;

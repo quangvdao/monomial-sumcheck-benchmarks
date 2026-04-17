@@ -568,7 +568,7 @@ fn bench_fp128(c: &mut Criterion) {
             let g_orig = make_fp128(1usize << n_usize);
             let challenges = make_fp128(n_usize);
 
-            let mut order = [0usize, 1, 2, 3, 4, 5];
+            let mut order = [0usize, 1, 2, 3, 4, 5, 6];
             order.shuffle(&mut rand::thread_rng());
             for &idx in &order {
                 match idx {
@@ -598,6 +598,25 @@ fn bench_fp128(c: &mut Criterion) {
                                 criterion::BatchSize::LargeInput,
                             )
                         });
+                    }
+                    6 => {
+                        group.bench_with_input(
+                            BenchmarkId::new("delayed_fused", n),
+                            &n,
+                            |b, _| {
+                                b.iter_batched(
+                                    || (f_orig.clone(), g_orig.clone()),
+                                    |(mut f, mut g)| {
+                                        sumcheck_deg2_delayed_fp128_fused(
+                                            &mut f,
+                                            &mut g,
+                                            &challenges,
+                                        );
+                                    },
+                                    criterion::BatchSize::LargeInput,
+                                )
+                            },
+                        );
                     }
                     2 => {
                         group.bench_with_input(BenchmarkId::new("projective", n), &n, |b, _| {
@@ -826,7 +845,7 @@ fn bench_gf128(c: &mut Criterion) {
             let g_orig = make_gf128(1usize << n_usize);
             let challenges = make_gf128(n_usize);
 
-            let mut order = [0usize, 1, 2, 3];
+            let mut order = [0usize, 1, 2, 3, 4];
             order.shuffle(&mut rand::thread_rng());
             for &idx in &order {
                 match idx {
@@ -856,6 +875,25 @@ fn bench_gf128(c: &mut Criterion) {
                                 criterion::BatchSize::LargeInput,
                             )
                         });
+                    }
+                    4 => {
+                        group.bench_with_input(
+                            BenchmarkId::new("delayed_fused", n),
+                            &n,
+                            |b, _| {
+                                b.iter_batched(
+                                    || (f_orig.clone(), g_orig.clone()),
+                                    |(mut f, mut g)| {
+                                        sumcheck_deg2_delayed_gf128_fused(
+                                            &mut f,
+                                            &mut g,
+                                            &challenges,
+                                        );
+                                    },
+                                    criterion::BatchSize::LargeInput,
+                                )
+                            },
+                        );
                     }
                     2 => {
                         group.bench_with_input(BenchmarkId::new("projective", n), &n, |b, _| {
