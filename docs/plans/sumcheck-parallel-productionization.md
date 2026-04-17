@@ -266,8 +266,12 @@ extraction.
        ✅ Addressed in Phase B (Linux default now
        `available_parallelism()` = 32 on aragorn; macOS stays at 8
        after empirical validation, see `PARALLELISM.md` "M4 Max
-       pool-cap sweep"). D2 schedule table extension remains
-       outstanding (`n3`).
+       pool-cap sweep"). `n3` (D2 16/32 rungs) has been investigated
+       and closed: the schedule already selects `n_workers` by
+       computing `min(initial_pairs / TARGET_PAIRS_PER_WORKER,
+       pool_total)` in `pick_n_workers`, which naturally hits k=16
+       / k=32 without needing an explicit table. Halving happens
+       on the way down only, which is where it's needed anyway.
 
 ### Acceptance criteria for Phase A
 
@@ -297,11 +301,14 @@ extraction.
   benchmarks (no more pool-contamination contaminating rayon
   samples) and in production servers that need the CPU for other
   work when the prover is quiescent.
-- **Extend D2 schedule table.** With a 32-worker pool we want
-  `initial_pairs ≥ 32 × TARGET_PAIRS_PER_WORKER` to dispatch at
-  k = 32; else halve. Current schedule handles this correctly up to
-  8; needs explicit 16 and 32 rungs so we don't wait for the halving
-  loop to get there.
+- **Extend D2 schedule table** (`n3`, **closed**). The schedule
+  already selects `n_workers` via
+  `pick_n_workers(initial_pairs, pool_total, TARGET)` which returns
+  `min(initial_pairs / TARGET, pool_total)`: this hits k=16 / k=32
+  naturally on aragorn without any table entries. The halving loop
+  only kicks in when per-worker pairs drop below
+  `MIN_PAIRS_PER_WORKER`, which is exactly when we *want* to
+  halve. No code change needed.
 - **pclmulqdq backend for GF128 on x86-64.** Aragorn GF128 is ~10×
   slower than M4 NEON because we fall through to the scalar `u128`
   path. Separate workstream from parallelism, but the
@@ -506,6 +513,50 @@ Deferred until a downstream caller needs them:
 - **D5 GPU offload**: out of scope. Different regime.
 - **D6 round pipelining**: out of scope. Blocked by Fiat-Shamir
   challenge dependency.
+
+## Scheduling strategies (`Schedule::{Static, Guided, Steal}`)
+
+`sumcheck-parallel::par_sumcheck` takes a `Schedule` enum selecting
+the per-round work-distribution policy. Shipped today:
+
+- `Schedule::Static` (default): static pair-range partition per
+  worker. Zero atomic cost on the clean path, relies on
+  self-read invariant for round-to-round visibility.
+- `Schedule::Guided { granularity }`: shared `AtomicUsize` cursor
+  per round, workers grab chunks dynamically. Bounds tail latency
+  under preemption to one chunk's worth of work. Convenience
+  constructor `Schedule::guided()` returns `granularity = 4`.
+
+A/B on M4 Max (see `PARALLELISM.md` "Scheduling strategies"):
+- Static wins on p50 by 3-40% at large n, 11-88% at medium n.
+- Guided wins on p99 at every n ≥ 12 for GF128 and all n for
+  Fp128, with the advantage growing with n (32% at n=18 GF128,
+  19% at n=18 Fp128). On max latency (1-in-2000 samples), guided
+  shows 74-86% improvements at n=18.
+
+Call-site guidance lives in the `Schedule` enum's doc comment and
+in `PARALLELISM.md` "When to pick which". Both schedules are
+exhaustively tested in `sumcheck-parallel/tests/toy_round.rs`
+(4 schedules × 2 fused variants × 5 sizes = 40 cases per test
+run).
+
+### Phase B follow-up: `Schedule::Steal` (work-stealing queue)
+
+Not yet shipped. The enum is designed to accept a `Steal` variant
+without breaking existing call-sites. Expected shape:
+
+- Per-worker owned deque (`ChaseLevDeque` or equivalent).
+- At round start, main populates each worker's deque with its
+  "home" chunk range. Workers drain their own deque bottom-up,
+  and when empty, steal from a random victim's deque top.
+- No shared-cursor contention on the clean path (Chase-Lev steals
+  touch only the victim's top pointer, and each steal is an
+  atomic). Tail behaviour should match or beat guided's.
+- Complexity: ~300-500 LOC and careful memory-ordering review.
+
+Trigger: if guided's mean overhead is judged too high for default
+use on some deployment, or if we want a single schedule that is
+both the p50 and p99 winner.
 
 ## Further investigations (track separately)
 

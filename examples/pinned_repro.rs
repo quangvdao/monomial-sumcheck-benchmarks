@@ -16,6 +16,13 @@ use std::time::Instant;
 
 use monomial_sumcheck_benchmarks::sumcheck::*;
 
+fn parse_schedule() -> Schedule {
+    match std::env::var("SCHEDULE").as_deref() {
+        Ok("guided") | Ok("Guided") => Schedule::guided(),
+        _ => Schedule::Static,
+    }
+}
+
 fn main() {
     let n: usize = std::env::var("N").ok().and_then(|s| s.parse().ok()).unwrap_or(16);
     let field = std::env::var("FIELD").unwrap_or_else(|_| "fp128".into());
@@ -27,8 +34,11 @@ fn main() {
         .ok()
         .map(|s| matches!(s.as_str(), "1" | "true" | "yes"))
         .unwrap_or(false);
+    let schedule = parse_schedule();
 
-    eprintln!("n={n} field={field} n_iter={n_iter} fused={use_fused_path}");
+    eprintln!(
+        "n={n} field={field} n_iter={n_iter} fused={use_fused_path} schedule={schedule:?}"
+    );
     eprintln!("warming up pool");
     PinnedPool::global().broadcast_scoped(PinnedPool::global().n_workers(), &|_| {});
 
@@ -42,7 +52,7 @@ fn main() {
             let mut f = f_orig.clone();
             let mut g = g_orig.clone();
             let t = Instant::now();
-            sumcheck_deg2_delayed_fp128_pinned(&mut f, &mut g, &challenges, use_fused_path);
+            sumcheck_deg2_delayed_fp128_pinned(&mut f, &mut g, &challenges, use_fused_path, schedule);
             let dt = t.elapsed().as_secs_f64() * 1e6;
             samples.push(dt);
             assert_eq!(f.len(), 1);
@@ -55,7 +65,7 @@ fn main() {
             let mut f = f_orig.clone();
             let mut g = g_orig.clone();
             let t = Instant::now();
-            sumcheck_deg2_delayed_gf128_pinned(&mut f, &mut g, &challenges, use_fused_path);
+            sumcheck_deg2_delayed_gf128_pinned(&mut f, &mut g, &challenges, use_fused_path, schedule);
             let dt = t.elapsed().as_secs_f64() * 1e6;
             samples.push(dt);
             assert_eq!(f.len(), 1);

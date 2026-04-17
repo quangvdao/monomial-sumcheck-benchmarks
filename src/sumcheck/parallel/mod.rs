@@ -31,4 +31,4 @@ pub mod legacy;
 pub use impls::{sumcheck_deg2_delayed_fp128_pinned, sumcheck_deg2_delayed_gf128_pinned};
 pub use legacy::*;
 pub use pinned_pool::PinnedPool;
-pub use sumcheck_parallel::{par_sumcheck, SumcheckRound};
+pub use sumcheck_parallel::{par_sumcheck, Schedule, SumcheckRound};

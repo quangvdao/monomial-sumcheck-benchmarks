@@ -37,13 +37,32 @@ fn check_gf128(n: usize) {
     let mut g_p3 = g.clone();
     sumcheck_deg2_delayed_gf128_persistent(&mut f_p3, &mut g_p3, &challenges);
 
-    let mut f_p4 = f.clone();
-    let mut g_p4 = g.clone();
-    sumcheck_deg2_delayed_gf128_pinned(&mut f_p4, &mut g_p4, &challenges, false);
+    for schedule in [Schedule::Static, Schedule::guided()] {
+        let mut f_p4 = f.clone();
+        let mut g_p4 = g.clone();
+        sumcheck_deg2_delayed_gf128_pinned(&mut f_p4, &mut g_p4, &challenges, false, schedule);
 
-    let mut f_p4_fused = f.clone();
-    let mut g_p4_fused = g.clone();
-    sumcheck_deg2_delayed_gf128_pinned(&mut f_p4_fused, &mut g_p4_fused, &challenges, true);
+        let mut f_p4_fused = f.clone();
+        let mut g_p4_fused = g.clone();
+        sumcheck_deg2_delayed_gf128_pinned(&mut f_p4_fused, &mut g_p4_fused, &challenges, true, schedule);
+
+        assert_eq!(
+            f_p4, f_seq,
+            "GF128 pinned (unfused, {schedule:?}) f mismatch at n={n}"
+        );
+        assert_eq!(
+            g_p4, g_seq,
+            "GF128 pinned (unfused, {schedule:?}) g mismatch at n={n}"
+        );
+        assert_eq!(
+            f_p4_fused, f_seq,
+            "GF128 pinned (fused, {schedule:?}) f mismatch at n={n}"
+        );
+        assert_eq!(
+            g_p4_fused, g_seq,
+            "GF128 pinned (fused, {schedule:?}) g mismatch at n={n}"
+        );
+    }
 
     assert_eq!(f_scope, f_seq, "GF128 rayon_scope f mismatch at n={n}");
     assert_eq!(g_scope, g_seq, "GF128 rayon_scope g mismatch at n={n}");
@@ -51,10 +70,6 @@ fn check_gf128(n: usize) {
     assert_eq!(g_pi, g_seq, "GF128 rayon_iter g mismatch at n={n}");
     assert_eq!(f_p3, f_seq, "GF128 persistent f mismatch at n={n}");
     assert_eq!(g_p3, g_seq, "GF128 persistent g mismatch at n={n}");
-    assert_eq!(f_p4, f_seq, "GF128 pinned (unfused) f mismatch at n={n}");
-    assert_eq!(g_p4, g_seq, "GF128 pinned (unfused) g mismatch at n={n}");
-    assert_eq!(f_p4_fused, f_seq, "GF128 pinned (fused) f mismatch at n={n}");
-    assert_eq!(g_p4_fused, g_seq, "GF128 pinned (fused) g mismatch at n={n}");
 
     #[cfg(feature = "parallel_chili")]
     {
@@ -89,13 +104,32 @@ fn check_fp128(n: usize) {
     let mut g_p3 = g.clone();
     sumcheck_deg2_delayed_fp128_persistent(&mut f_p3, &mut g_p3, &challenges);
 
-    let mut f_p4 = f.clone();
-    let mut g_p4 = g.clone();
-    sumcheck_deg2_delayed_fp128_pinned(&mut f_p4, &mut g_p4, &challenges, false);
+    for schedule in [Schedule::Static, Schedule::guided()] {
+        let mut f_p4 = f.clone();
+        let mut g_p4 = g.clone();
+        sumcheck_deg2_delayed_fp128_pinned(&mut f_p4, &mut g_p4, &challenges, false, schedule);
 
-    let mut f_p4_fused = f.clone();
-    let mut g_p4_fused = g.clone();
-    sumcheck_deg2_delayed_fp128_pinned(&mut f_p4_fused, &mut g_p4_fused, &challenges, true);
+        let mut f_p4_fused = f.clone();
+        let mut g_p4_fused = g.clone();
+        sumcheck_deg2_delayed_fp128_pinned(&mut f_p4_fused, &mut g_p4_fused, &challenges, true, schedule);
+
+        assert_eq!(
+            f_p4, f_seq,
+            "Fp128 pinned (unfused, {schedule:?}) f mismatch at n={n}"
+        );
+        assert_eq!(
+            g_p4, g_seq,
+            "Fp128 pinned (unfused, {schedule:?}) g mismatch at n={n}"
+        );
+        assert_eq!(
+            f_p4_fused, f_seq,
+            "Fp128 pinned (fused, {schedule:?}) f mismatch at n={n}"
+        );
+        assert_eq!(
+            g_p4_fused, g_seq,
+            "Fp128 pinned (fused, {schedule:?}) g mismatch at n={n}"
+        );
+    }
 
     assert_eq!(f_scope, f_seq, "Fp128 rayon_scope f mismatch at n={n}");
     assert_eq!(g_scope, g_seq, "Fp128 rayon_scope g mismatch at n={n}");
@@ -103,10 +137,6 @@ fn check_fp128(n: usize) {
     assert_eq!(g_pi, g_seq, "Fp128 rayon_iter g mismatch at n={n}");
     assert_eq!(f_p3, f_seq, "Fp128 persistent f mismatch at n={n}");
     assert_eq!(g_p3, g_seq, "Fp128 persistent g mismatch at n={n}");
-    assert_eq!(f_p4, f_seq, "Fp128 pinned (unfused) f mismatch at n={n}");
-    assert_eq!(g_p4, g_seq, "Fp128 pinned (unfused) g mismatch at n={n}");
-    assert_eq!(f_p4_fused, f_seq, "Fp128 pinned (fused) f mismatch at n={n}");
-    assert_eq!(g_p4_fused, g_seq, "Fp128 pinned (fused) g mismatch at n={n}");
 
     #[cfg(feature = "parallel_chili")]
     {

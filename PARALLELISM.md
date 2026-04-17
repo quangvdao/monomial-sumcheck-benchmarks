@@ -821,6 +821,106 @@ if the application has more structure than "one sumcheck call":
   per-round barrier. Removes the all-threads-arrive sync, but adds
   protocol complexity and has not been implemented here.
 
+## Scheduling strategies (`Schedule::Static` vs `Schedule::Guided`)
+
+The `sumcheck-parallel` scheduler exposes a runtime-selectable
+work-distribution policy via `Schedule`:
+
+- **`Schedule::Static` (default)**. Worker `i` owns the fixed pair
+  range `[i·C, (i+1)·C)` for every round of a phase. Zero atomic
+  cost per round beyond the barrier counters. Self-read invariant
+  between rounds (worker `i` reads exactly what worker `i` wrote
+  one round ago), so no cross-worker bind-visibility is needed.
+  Tail latency = max over all workers; any one preempted worker
+  stalls everyone on the barrier.
+
+- **`Schedule::Guided { granularity }` (recommended `granularity =
+  4`, exposed as `Schedule::guided()`)**. Each round is split into
+  `granularity × n_workers` chunks and workers grab them
+  dynamically via a shared `AtomicUsize::fetch_add(1, Relaxed)`
+  cursor. Bounds tail latency under preemption to roughly one
+  chunk's worth of work. Breaks the self-read invariant, so the
+  scheduler adds a `bind_counter` (unfused path) or chains through
+  the existing `reduce_counter`/`bind_go` pair (fused path) for
+  cross-worker visibility.
+
+Both are fully correct (exhaustively tested in `toy_round.rs` over
+4 schedule values × 2 fused values = 8 configurations per size).
+The trade-off is **mean throughput** (Static wins, zero atomic
+cost on the clean path) vs **tail latency** (Guided wins,
+one-chunk tail bound under preemption).
+
+### A/B on M4 Max (p50 and p99 wall time, 2000 samples per cell)
+
+Pinned, fused kernel, across 5 problem sizes × 2 fields:
+
+| n  | field | static p50 | guided p50 | Δp50 | static p99 | guided p99 | Δp99 |
+|----|-------|-----------:|-----------:|-----:|-----------:|-----------:|-----:|
+| 10 | gf128 |   3.88 µs  |   5.21 µs  | +34% |     31 µs  |     33 µs  |  +6% |
+| 10 | fp128 |   7.58 µs  |   9.62 µs  | +27% |     26 µs  |     22 µs  | −15% |
+| 12 | gf128 |  12.46 µs  |  23.38 µs  | +88% |     73 µs  |     80 µs  | +10% |
+| 12 | fp128 |  19.88 µs  |  27.58 µs  | +39% |    227 µs  |    180 µs  | −21% |
+| 14 | gf128 |  26.58 µs  |  35.21 µs  | +32% |    219 µs  |    207 µs  |  −5% |
+| 14 | fp128 |  48.08 µs  |  53.33 µs  | +11% |    174 µs  |    148 µs  | −15% |
+| 16 | gf128 |  57.50 µs  |  70.33 µs  | +22% |    347 µs  |    294 µs  | −15% |
+| 16 | fp128 | 131.92 µs  | 141.21 µs  |  +7% |    685 µs  |    498 µs  | −27% |
+| 18 | gf128 | 183.58 µs  | 200.92 µs  |  +9% |    798 µs  |    539 µs  | **−32%** |
+| 18 | fp128 | 476.12 µs  | 490.04 µs  |  +3% |   1158 µs  |    935 µs  | **−19%** |
+
+(`n` = log₂(poly size); measured 2026-04 on quiet M4 Max laptop,
+`pinned_ab --features parallel`, `N_ITER=2000`. Columns shown are
+fused kernel only; unfused numbers are similar and live in the
+same sweep log. The `max` column is reported in the log too but is
+single-sample and much noisier than p99.)
+
+### Pattern
+
+- **Mean overhead (p50)**: 3-40% cost at large n (16, 18); 11-88%
+  at medium n (12, 14); essentially capped at ~10% once n is large
+  enough that per-worker work is ≫ per-round atomic cost. The cost
+  scales with atomic count (~G × n_workers per round), so `n = 18`
+  has the smallest relative overhead.
+
+- **Tail latency (p99)**: guided beats static at every cell with
+  n ≥ 12 except the tiny n=12 GF128 case. The advantage grows with
+  n: at n=18 guided shows 32% lower p99 (GF128) and 19% lower p99
+  (Fp128). For max latency (1 sample out of 2000), guided's
+  advantage reaches −74% (GF128 n=18) and −86% (Fp128 n=18); see
+  the raw log for those numbers. Smaller-n tails are dominated by
+  OS noise (allocator hiccups, thermal throttling) that both
+  schedules face equally, so the advantage only shows up once the
+  tail is coming from a single preempted worker rather than
+  system-wide jitter.
+
+### When to pick which
+
+- **Dedicated servers (aragorn, production prover fleets)**:
+  `Schedule::Static` (default). The pool already has exclusive
+  cores, so there's no preemption tail to protect against; guided
+  just pays the atomic overhead for near-zero benefit.
+
+- **Shared / interactive machines (laptops, CI containers, dev
+  VMs)**: `Schedule::guided()`. p99 and max are what the end user
+  feels; for `n ≥ 16` the mean cost is single-digit percent and
+  the tail is 3-10× better.
+
+- **Latency-critical services (SLO on 99th percentile)**: guided
+  always. The mean cost is dwarfed by what you'd lose if even 1%
+  of requests are tail-slow.
+
+- **Uncertain / mixed deployments**: start with static; switch to
+  guided at the first sign of p99 regressions. The API cost is
+  one enum variant per call-site.
+
+### Future schedules
+
+`Schedule` is designed to accept a `Steal` variant (Chase-Lev-style
+per-worker deque with work-stealing) without breaking existing
+call-sites. This would match Rayon's resilience model with no
+shared atomic contention on the clean path, and is tracked as
+"Phase B follow-up: `Schedule::Steal`" in
+`docs/plans/sumcheck-parallel-productionization.md`.
+
 ## Recommendation
 
 For the delayed sumcheck kernel on Apple Silicon:

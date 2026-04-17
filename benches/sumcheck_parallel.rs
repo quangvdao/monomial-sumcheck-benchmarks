@@ -18,8 +18,13 @@
 //!                           `--features parallel_chili`).
 //! - `delayed_persistent`  : one rayon scope for the whole call, persistent
 //!                           workers + atomic-barrier synchronization.
-//! - `delayed_pinned_{unfused,fused}` : production pinned-pool + doorbell,
-//!                           driven by `sumcheck_parallel::par_sumcheck`.
+//! - `delayed_pinned_{static,guided}_{unfused,fused}` : production
+//!                           pinned-pool + doorbell, driven by
+//!                           `sumcheck_parallel::par_sumcheck`.
+//!                           Cartesian over schedule (static partition
+//!                           vs guided-dispatch cursor) and fused
+//!                           (split reduce+bind vs one-pass fused
+//!                           kernel).
 //!
 //! Sizes sweep `n ∈ {10, 12, 14, 16, 18, 20}` so the per-round `half` covers
 //! both the "parallel obviously loses" and "parallel obviously wins" regimes.
@@ -127,10 +132,29 @@ fn bench_dispatch_floor(c: &mut Criterion) {
 }
 
 // Indices for the randomised run order per `n`.
-// Base variants (in order): 0 delayed, 1 rayon_scope, 2 rayon_iter,
-// 3 persistent, 4 pinned_unfused, 5 pinned_fused.
+// Base variants (in order):
+//   0 delayed
+//   1 rayon_scope
+//   2 rayon_iter
+//   3 persistent
+//   4 pinned_static_unfused
+//   5 pinned_static_fused
+//   6 pinned_guided_unfused
+//   7 pinned_guided_fused
 // Chili bases (if enabled) follow.
-const N_BASE_VARIANTS: usize = 6;
+const N_BASE_VARIANTS: usize = 8;
+
+/// Decode a `pinned_*` variant index (4..=7) into (schedule, fused,
+/// label-suffix).
+fn pinned_variant(idx: usize) -> (Schedule, bool, &'static str) {
+    match idx {
+        4 => (Schedule::Static, false, "pinned_static_unfused"),
+        5 => (Schedule::Static, true, "pinned_static_fused"),
+        6 => (Schedule::guided(), false, "pinned_guided_unfused"),
+        7 => (Schedule::guided(), true, "pinned_guided_fused"),
+        _ => unreachable!(),
+    }
+}
 #[cfg(feature = "parallel_chili")]
 const N_GF128_VARIANTS: usize = N_BASE_VARIANTS + CHILI_BASES.len();
 #[cfg(not(feature = "parallel_chili"))]
@@ -217,45 +241,24 @@ fn bench_gf128(c: &mut Criterion) {
                         },
                     );
                 }
-                4 => {
-                    group.bench_with_input(
-                        BenchmarkId::new("delayed_pinned_unfused", n),
-                        &n,
-                        |b, _| {
-                            b.iter_batched(
-                                || (f_orig.clone(), g_orig.clone()),
-                                |(mut f, mut g)| {
-                                    sumcheck_deg2_delayed_gf128_pinned(
-                                        &mut f,
-                                        &mut g,
-                                        &challenges,
-                                        false,
-                                    );
-                                },
-                                criterion::BatchSize::LargeInput,
-                            )
-                        },
-                    );
-                }
-                5 => {
-                    group.bench_with_input(
-                        BenchmarkId::new("delayed_pinned_fused", n),
-                        &n,
-                        |b, _| {
-                            b.iter_batched(
-                                || (f_orig.clone(), g_orig.clone()),
-                                |(mut f, mut g)| {
-                                    sumcheck_deg2_delayed_gf128_pinned(
-                                        &mut f,
-                                        &mut g,
-                                        &challenges,
-                                        true,
-                                    );
-                                },
-                                criterion::BatchSize::LargeInput,
-                            )
-                        },
-                    );
+                k @ 4..=7 => {
+                    let (schedule, fused, suffix) = pinned_variant(k);
+                    let label = format!("delayed_{suffix}");
+                    group.bench_with_input(BenchmarkId::new(label, n), &n, |b, _| {
+                        b.iter_batched(
+                            || (f_orig.clone(), g_orig.clone()),
+                            |(mut f, mut g)| {
+                                sumcheck_deg2_delayed_gf128_pinned(
+                                    &mut f,
+                                    &mut g,
+                                    &challenges,
+                                    fused,
+                                    schedule,
+                                );
+                            },
+                            criterion::BatchSize::LargeInput,
+                        )
+                    });
                 }
                 #[cfg(feature = "parallel_chili")]
                 k if (N_BASE_VARIANTS..N_BASE_VARIANTS + CHILI_BASES.len()).contains(&k) => {
@@ -364,45 +367,24 @@ fn bench_fp128(c: &mut Criterion) {
                         },
                     );
                 }
-                4 => {
-                    group.bench_with_input(
-                        BenchmarkId::new("delayed_pinned_unfused", n),
-                        &n,
-                        |b, _| {
-                            b.iter_batched(
-                                || (f_orig.clone(), g_orig.clone()),
-                                |(mut f, mut g)| {
-                                    sumcheck_deg2_delayed_fp128_pinned(
-                                        &mut f,
-                                        &mut g,
-                                        &challenges,
-                                        false,
-                                    );
-                                },
-                                criterion::BatchSize::LargeInput,
-                            )
-                        },
-                    );
-                }
-                5 => {
-                    group.bench_with_input(
-                        BenchmarkId::new("delayed_pinned_fused", n),
-                        &n,
-                        |b, _| {
-                            b.iter_batched(
-                                || (f_orig.clone(), g_orig.clone()),
-                                |(mut f, mut g)| {
-                                    sumcheck_deg2_delayed_fp128_pinned(
-                                        &mut f,
-                                        &mut g,
-                                        &challenges,
-                                        true,
-                                    );
-                                },
-                                criterion::BatchSize::LargeInput,
-                            )
-                        },
-                    );
+                k @ 4..=7 => {
+                    let (schedule, fused, suffix) = pinned_variant(k);
+                    let label = format!("delayed_{suffix}");
+                    group.bench_with_input(BenchmarkId::new(label, n), &n, |b, _| {
+                        b.iter_batched(
+                            || (f_orig.clone(), g_orig.clone()),
+                            |(mut f, mut g)| {
+                                sumcheck_deg2_delayed_fp128_pinned(
+                                    &mut f,
+                                    &mut g,
+                                    &challenges,
+                                    fused,
+                                    schedule,
+                                );
+                            },
+                            criterion::BatchSize::LargeInput,
+                        )
+                    });
                 }
                 #[cfg(feature = "parallel_chili")]
                 k if (N_BASE_VARIANTS..N_BASE_VARIANTS + CHILI_BASES.len()).contains(&k) => {

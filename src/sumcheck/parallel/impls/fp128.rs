@@ -7,7 +7,7 @@
 
 use hachi_pcs::AdditiveGroup as _;
 use pinned_pool::PinnedPool;
-use sumcheck_parallel::{par_sumcheck, pick_n_workers, SumcheckRound};
+use sumcheck_parallel::{par_sumcheck, pick_n_workers, Schedule, SumcheckRound};
 
 use super::super::super::fp128::{sumcheck_deg2_delayed_fp128, sumcheck_deg2_delayed_fp128_fused};
 use super::super::super::Fp128;
@@ -156,11 +156,18 @@ impl SumcheckRound for Fp128DelayedRound {
 /// The sequential tail (small-round fallback) follows the same
 /// choice via `sumcheck_deg2_delayed_fp128_fused` vs
 /// `sumcheck_deg2_delayed_fp128`.
+///
+/// `schedule` selects the per-round work-distribution policy. See
+/// [`Schedule`] for the full trade-off; `Schedule::default()` =
+/// `Schedule::Static` is the best choice for dedicated-core
+/// deployments, and `Schedule::guided()` is the best choice for
+/// noisy / preemption-prone hosts.
 pub fn sumcheck_deg2_delayed_fp128_pinned(
     f: &mut Vec<Fp128>,
     g: &mut Vec<Fp128>,
     challenges: &[Fp128],
     use_fused_path: bool,
+    schedule: Schedule,
 ) {
     let n_rounds = challenges.len();
     if n_rounds == 0 {
@@ -202,6 +209,7 @@ pub fn sumcheck_deg2_delayed_fp128_pinned(
         n_workers_initial,
         round.initial_pairs(),
         use_fused_path,
+        schedule,
     );
 
     if rounds_done == 0 {

@@ -13,7 +13,7 @@
 
 use binius_field::Field as _;
 use pinned_pool::PinnedPool;
-use sumcheck_parallel::{par_sumcheck, pick_n_workers, SumcheckRound};
+use sumcheck_parallel::{par_sumcheck, pick_n_workers, Schedule, SumcheckRound};
 
 use super::super::super::gf128::{sumcheck_deg2_delayed_gf128, sumcheck_deg2_delayed_gf128_fused};
 use super::super::super::GF128;
@@ -184,11 +184,18 @@ impl SumcheckRound for GF128DelayedRound {
 /// The sequential tail (small-round fallback) follows the same
 /// choice via `sumcheck_deg2_delayed_gf128_fused` vs
 /// `sumcheck_deg2_delayed_gf128`.
+///
+/// `schedule` selects the per-round work-distribution policy. See
+/// [`Schedule`] for the full trade-off; `Schedule::default()` =
+/// `Schedule::Static` is the best choice for dedicated-core
+/// deployments, and `Schedule::guided()` is the best choice for
+/// noisy / preemption-prone hosts.
 pub fn sumcheck_deg2_delayed_gf128_pinned(
     f: &mut Vec<GF128>,
     g: &mut Vec<GF128>,
     challenges: &[GF128],
     use_fused_path: bool,
+    schedule: Schedule,
 ) {
     let n_rounds = challenges.len();
     if n_rounds == 0 {
@@ -230,6 +237,7 @@ pub fn sumcheck_deg2_delayed_gf128_pinned(
         n_workers_initial,
         round.initial_pairs(),
         use_fused_path,
+        schedule,
     );
 
     if rounds_done == 0 {
