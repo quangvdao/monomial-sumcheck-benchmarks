@@ -12,13 +12,12 @@
 //! point used by tests and benches.
 
 use binius_field::Field as _;
+use pinned_pool::PinnedPool;
+use sumcheck_parallel::{par_sumcheck, pick_n_workers, SumcheckRound};
 
-use super::super::field::SumcheckRound;
-use super::super::legacy::{bind_chunk_gf128, partial_triple_gf128};
-use super::super::pool::PinnedPool;
-use super::super::scheduler::{par_sumcheck, pick_n_workers};
 use super::super::super::gf128::sumcheck_deg2_delayed_gf128;
 use super::super::super::GF128;
+use super::super::legacy::{bind_chunk_gf128, partial_triple_gf128};
 
 /// Owns the ping-pong buffers for one sumcheck call.
 ///

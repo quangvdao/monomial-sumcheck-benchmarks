@@ -6,13 +6,12 @@
 //! shared helpers in [`super::super::legacy`].
 
 use hachi_pcs::AdditiveGroup as _;
+use pinned_pool::PinnedPool;
+use sumcheck_parallel::{par_sumcheck, pick_n_workers, SumcheckRound};
 
-use super::super::field::SumcheckRound;
-use super::super::legacy::{bind_chunk_fp128, partial_triple_fp128};
-use super::super::pool::PinnedPool;
-use super::super::scheduler::{par_sumcheck, pick_n_workers};
 use super::super::super::fp128::sumcheck_deg2_delayed_fp128;
 use super::super::super::Fp128;
+use super::super::legacy::{bind_chunk_fp128, partial_triple_fp128};
 
 /// Owns the ping-pong buffers for one sumcheck call. See
 /// [`super::gf128::GF128DelayedRound`] for the rationale behind

@@ -411,6 +411,79 @@ Two options for follow-up (tracked under Phase B in the plan doc):
 Neither blocks Phase A shipping; both are profile-guided tunings on
 top of the current trait + scheduler.
 
+## Aragorn, Phase B: `pinned-pool` crate + auto-park + 32 workers
+
+Phase B of the productionization plan (see
+`docs/plans/sumcheck-parallel-productionization.md`) lifts the pool
+cap and introduces auto-park so the pool is honest neighbor in
+benchmarks and servers:
+
+1. **`pinned-pool` crate extracted** to `~/Documents/SNARKs/pinned-pool/`
+   (local path dep for now). Main repo imports via `pinned_pool::PinnedPool`.
+2. **Default cap lifted** to `available_parallelism()` on Linux (= 32
+   logical cores on aragorn) with affinity-based pinning that fills
+   physical cores first and then SMT siblings. macOS stays conservative
+   at `min(P-cores - 2, 8)` because QoS pinning is a hint, not an
+   anchor.
+3. **Auto-park on idle**: workers spin for ~300 µs-1 ms of
+   `hint::spin_loop` after a task, then transition to `thread::park()`
+   using Dekker-style coordination between main's
+   `assigned_gen.store(Release) + fence(SeqCst) + parked.load` and the
+   worker's mirror sequence. First dispatch after long idle pays one
+   `unpark` per active worker (~200 ns-1 µs), subsequent hot dispatches
+   stay in the spin path with zero futex overhead.
+4. **Bench fairness**: auto-park eliminates the pool-contamination
+   artifact where rayon benchmarks looked 10-30× slower when run
+   serially in the same Criterion process after `par4_pinned` had
+   warmed its pool.
+
+Numbers below are from the first fair Criterion sweep with all four
+variants in the same process, pool default = 32, `PINNED_POOL_DEBUG=0`:
+
+**GF128 (aragorn, Zen 5 × 32 logical)**
+
+| n  | seq      | par1_scope | par1_pariter | par3_persist | **par4_pinned** | par4 vs best rayon |
+|----|----------|------------|--------------|--------------|-----------------|--------------------|
+| 10 | 94.8 µs  | 252 µs     | 230 µs       | 144 µs       | **49.3 µs**     | 2.9× faster        |
+| 12 | 378 µs   | 331 µs     | 307 µs       | 223 µs       | **102 µs**      | 3.0× faster        |
+| 14 | 1.52 ms  | 445 µs     | 461 µs       | 233 µs       | **134 µs**      | 1.7× faster        |
+| 16 | 6.09 ms  | 873 µs     | 911 µs       | 680 µs       | **530 µs**      | 1.3× faster        |
+| 18 | 24.3 ms  | 3.17 ms    | 3.18 ms      | 3.57 ms      | **2.64 ms**     | 1.2× faster        |
+| 20 | 97.7 ms  | 12.0 ms    | 12.4 ms      | 12.3 ms      | **10.7 ms**     | 1.12× faster       |
+
+**Fp128 (aragorn)**
+
+| n  | seq      | par1_scope | par1_pariter | par3_persist | **par4_pinned** | par4 vs best rayon |
+|----|----------|------------|--------------|--------------|-----------------|--------------------|
+| 10 | 11.3 µs  | 154 µs     | 230 µs       | 27.7 µs      | **6.86 µs**     | 4.0× faster (vs par3) |
+| 12 | 44.7 µs  | 200 µs     | 298 µs       | 40.8 µs      | **10.7 µs**     | 3.8× faster (vs par3) |
+| 14 | 179 µs   | 278 µs     | 379 µs       | 263 µs       | **55.8 µs**     | 4.7× faster (vs par3) |
+| 16 | 719 µs   | 454 µs     | 636 µs       | 232 µs       | **151 µs**      | 1.5× faster (vs par3) |
+| 18 | 2.88 ms  | 1.02 ms    | 1.37 ms      | 741 µs       | **519 µs**      | 1.4× faster (vs par3) |
+| 20 | 11.6 ms  | 5.78 ms    | 6.88 ms      | 5.32 ms      | **5.27 ms**     | 1.01× faster (vs par3) |
+
+**`par4_pinned` wins at every `(field, n)` pair**, with the gap
+widening at small n (where the dispatch floor dominates) and
+narrowing at n=20 (where we are bandwidth-bound and any sane
+parallelizer converges to the same number). This is the "always beat
+rayon at every scale" goal from the productionization plan.
+
+Dispatch floor at pool size 32 on aragorn (for comparison):
+
+| `k` | cost    |
+|-----|---------|
+|  2  | 72.4 ns |
+|  4  | 104 ns  |
+|  8  | 99.7 ns |
+| 12  | 428 ns  |
+| 16  | 485 ns  |
+| 24  | 479 ns  |
+| 32  | 564 ns  |
+
+Rayon equivalents (same process, pool init'd): `rayon::scope` on 32
+threads costs 21.7 µs/dispatch and `par_iter` on 32 threads costs
+12.8 µs. The pinned pool is 40-300× cheaper per dispatch.
+
 ## Detailed findings
 
 ### 1. Approach 4 (pinned pool + doorbell) is the overall winner.

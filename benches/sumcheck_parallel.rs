@@ -105,7 +105,7 @@ fn bench_dispatch_floor(c: &mut Criterion) {
     // how the barrier cost scales with contention.
     let pool = monomial_sumcheck_benchmarks::sumcheck::PinnedPool::global();
     pool.broadcast_scoped(pool.n_workers(), &|_| {});
-    for k in [2usize, 4, 8]
+    for k in [2usize, 4, 8, 12, 16, 24, 32]
         .iter()
         .copied()
         .filter(|k| *k <= pool.n_workers())

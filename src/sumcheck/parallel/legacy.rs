@@ -1097,12 +1097,13 @@ pub fn sumcheck_deg2_delayed_fp128_par3_persistent(
 }
 
 // ============================================================================
-// Approach 4 lives in the `impls/` and `scheduler` modules now.
+// Approach 4 lives in the `impls/` module plus the external
+// `sumcheck-parallel` crate now.
 // ============================================================================
-// The pool extracted to `super::pool`. The trait + driver live in
-// `super::field` and `super::scheduler`. The public wrappers
-// (`sumcheck_deg2_delayed_{gf128,fp128}_par4_pinned`) live in
-// `super::impls::{gf128,fp128}` and reuse the helpers above
+// The pool is `pinned_pool::PinnedPool`. The trait + driver live in
+// the `sumcheck-parallel` crate (`~/Documents/SNARKs/sumcheck-parallel/`).
+// The public wrappers (`sumcheck_deg2_delayed_{gf128,fp128}_par4_pinned`)
+// live in `super::impls::{gf128,fp128}` and reuse the helpers above
 // (`partial_triple_*`, `bind_chunk_*`, `worker_chunk_range`).
 
 // ============================================================================
@@ -1139,7 +1140,7 @@ pub fn sumcheck_deg2_delayed_gf128_par4_pinned_legacy(
     }
     let initial_pairs = initial_len / 2;
 
-    let pool = super::pool::PinnedPool::global();
+    let pool = pinned_pool::PinnedPool::global();
     let pool_total = pool.n_workers();
     let n_workers = par4_n_workers(initial_pairs, pool_total);
     let scope_rounds = par3_scope_rounds(initial_pairs, n_workers, n_rounds);
@@ -1250,7 +1251,7 @@ pub fn sumcheck_deg2_delayed_fp128_par4_pinned_legacy(
     }
     let initial_pairs = initial_len / 2;
 
-    let pool = super::pool::PinnedPool::global();
+    let pool = pinned_pool::PinnedPool::global();
     let pool_total = pool.n_workers();
     let n_workers = par4_n_workers(initial_pairs, pool_total);
     let scope_rounds = par3_scope_rounds(initial_pairs, n_workers, n_rounds);

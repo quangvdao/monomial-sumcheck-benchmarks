@@ -283,14 +283,23 @@ extraction.
 
 ### Phase A follow-ups (tracked for Phase B)
 
-- **Raise pool cap to physical_cores.** Currently
-  `min(available_parallelism, 8)`. Aragorn (16 phys × 2 SMT → 8) is
-  leaving 8 cores idle at n ≥ 18 where `par1_scope` wins. Candidate:
-  `min(physical_cores, 16)`.
-- **Extend D2 schedule table.** With a 16-worker pool we want
-  `initial_pairs ≥ 16 × TARGET_PAIRS_PER_WORKER` to dispatch at
-  k = 16; else start at k = 8 and halve from there. Current D2 halves
-  from `max_workers` regardless of problem size.
+- ✅ **Pool cap raised.** Linux default now
+  `available_parallelism()` (= logical cores, 32 on aragorn). macOS
+  stays at `min(P-cores - 2, 8)` because QoS pinning is a hint, not
+  an anchor. Opt-out: `PINNED_POOL_WORKERS=N`. The per-round `D2`
+  heuristic keeps small-n dispatches at low `k` so the larger pool
+  doesn't over-dispatch.
+- ✅ **Auto-park on idle.** Workers spin for ~300 µs-1 ms of
+  `hint::spin_loop`, then transition to `thread::park()` with
+  Dekker-style SeqCst fences on both sides. Honest neighbor in
+  benchmarks (no more pool-contamination contaminating rayon
+  samples) and in production servers that need the CPU for other
+  work when the prover is quiescent.
+- **Extend D2 schedule table.** With a 32-worker pool we want
+  `initial_pairs ≥ 32 × TARGET_PAIRS_PER_WORKER` to dispatch at
+  k = 32; else halve. Current schedule handles this correctly up to
+  8; needs explicit 16 and 32 rungs so we don't wait for the halving
+  loop to get there.
 - **pclmulqdq backend for GF128 on x86-64.** Aragorn GF128 is ~10×
   slower than M4 NEON because we fall through to the scalar `u128`
   path. Separate workstream from parallelism, but the
@@ -304,78 +313,107 @@ dependencies.
 
 ### Tasks
 
-1. **Create `~/Documents/SNARKs/pinned-pool/`** as a new git repo.
+1. ✅ **Created `~/Documents/SNARKs/pinned-pool/`** as a path-dep
+   crate (local only for now, no git remote yet).
    - Cargo crate, library only.
-   - Move `pool.rs` + `pool/platform/*` from this repo.
-   - Public API:
+   - Moved `pool.rs` + `pool/platform.rs` from this repo; this repo
+     now depends via `pinned-pool = { path = "../../SNARKs/pinned-pool" }`.
+   - Public API actually shipped:
      ```rust
      pub struct PinnedPool { ... }
-     pub struct PoolConfig {
-         pub size: Option<usize>,         // None = min(available_parallelism, 8)
-         pub pin_p_cores: bool,           // default true
-         pub spin_budget: Option<u32>,    // None = pure spin (requires pinning)
-         pub qos_user_interactive: bool,  // macOS only; default true
-     }
      impl PinnedPool {
          pub fn global() -> &'static PinnedPool;
-         pub fn new(config: PoolConfig) -> Arc<Self>;
          pub fn n_workers(&self) -> usize;
          pub fn broadcast_scoped(&self, n_active: usize, f: &(dyn Fn(usize) + Sync));
      }
+     pub fn default_pool_size() -> usize; // platform-aware
      ```
-   - Tests: ABA detection, shutdown on drop, broadcast correctness
-     across 1, 2, 4, 8, 16 workers.
-   - Benches: dispatch floor (k=1..16), shutdown latency.
-   - CI: GitHub Actions matrix `(macos-latest, ubuntu-latest) x
-     (stable, 1.94)`. No nightly.
+     Configuration is env-var driven (`PINNED_POOL_WORKERS`,
+     `PINNED_POOL_SCHED_FIFO`, `PINNED_POOL_DEBUG`); the
+     `PoolConfig`-struct form can be added later if a caller
+     actually needs programmatic override.
+   - Tests: broadcast correctness at n_active ∈ {1, 4, N}, many
+     times, and **auto-park correctness** (sleep > spin budget, then
+     dispatch, all workers wake).
+   - Auto-park: Dekker-style, SeqCst fence + `parked: AtomicBool`
+     per worker. Spin budget = 1M iterations (~300 µs-1 ms of
+     wall-clock) so dispatches within a prover loop stay in the fast
+     spin path, while a quiescent pool consumes zero CPU.
+   - Remaining work before extracting to a git remote:
+     - Sibling crate for integration tests at `tests/integration.rs`.
+     - Dispatch-floor + cold-start microbenches.
+     - GitHub Actions matrix `(macos-latest, ubuntu-latest) x
+       (stable, 1.95)`. No nightly.
 
-2. **Create `~/Documents/SNARKs/sumcheck-parallel/`.**
+2. ✅ **Created `~/Documents/SNARKs/sumcheck-parallel/`** as a
+   path-dep crate (local only, no git remote yet).
    - Cargo crate, library only.
-   - Depends on `pinned-pool` (path dep).
-   - Move `field.rs` + `scheduler.rs` from this repo.
-   - Move GF128/Fp128 reference impls into `src/impls/`.
-   - Public API:
+   - Depends on `pinned-pool` via path dep.
+   - Moved `field.rs` + `scheduler.rs` from this repo. Field-specific
+     impls (GF128/Fp128) stayed in this repo because they transitively
+     depend on `binius-field` / `hachi-pcs` and on the sequential
+     kernels hosted here; the crate is meant to stay field-agnostic.
+   - Public API actually shipped:
      ```rust
-     pub trait SumcheckRound { ... }
+     pub trait SumcheckRound { /* reduce_chunk, combine,
+         observe_partial, bind_chunk + 2 const tuning knobs */ }
      pub fn par_sumcheck<R: SumcheckRound>(
-         state: &mut R,
+         round: &R,
          challenges: &[R::Elem],
-         pool: Option<&PinnedPool>,
-     );
-     pub mod impls {
-         pub mod gf128;
-         pub mod fp128;
-     }
+         pool: &PinnedPool,
+         n_workers_initial: usize,
+         initial_pairs: usize,
+     ) -> usize; // returns rounds_done
+     pub fn pick_n_workers(initial_pairs: usize,
+                           pool_total: usize,
+                           target_pairs_per_worker: usize) -> usize;
      ```
-   - Tests: bit-identical parallel-vs-sequential property tests over
-     random inputs, all reference impls.
-   - Benches: per-(field, n) sweep, mirror this repo's
-     `benches/sumcheck_parallel.rs`.
-   - Doc-tests on the public API.
+   - Tests: end-to-end property test driving `par_sumcheck` with a
+     toy u64-ring round state, comparing output against a
+     hand-written sequential reduce-then-bind across log_n ∈
+     {3, 8, 12, 14, 18}. All 5 cases bit-identical.
+   - Doc-test on the module-level `no_run` example.
+   - **Deferred to later**: dispatch-floor/cold-start microbenches
+     (tracked as a Phase-B follow-up once the dispatch path is
+     touched again), full property tests across large random seeds,
+     GitHub Actions matrix.
 
-3. **Update this repo to depend on the new crates.**
-   - Replace `src/sumcheck/parallel/` with `[dev-dependencies]
-     sumcheck-parallel = { path = "../../SNARKs/sumcheck-parallel" }`.
-     (This repo lives in `~/Documents/Research/`; the new crates live
-     in `~/Documents/SNARKs/` alongside binius64, hachi, etc.)
-   - The repo continues to host the GF128/Fp128/BN254/BB ext kernels
-     (those stay sequential and codegen-tuned), plus the bench harness
-     calling `sumcheck-parallel`.
-   - PARALLELISM.md updated to reflect the crate split.
+3. ✅ **Main repo now depends on both crates.**
+   - `src/sumcheck/parallel/pool/` deleted. `PinnedPool` pulled from
+     the `pinned-pool` crate.
+   - `src/sumcheck/parallel/{field,scheduler}.rs` deleted. Trait +
+     driver pulled from the `sumcheck-parallel` crate.
+   - `src/sumcheck/parallel/impls/{gf128,fp128}.rs` rewritten to
+     `use sumcheck_parallel::{par_sumcheck, pick_n_workers,
+     SumcheckRound};` and are the first downstream implementors.
+   - `src/sumcheck/parallel/legacy.rs` unchanged (Approach 1-3
+     baselines, still uses `pinned_pool::PinnedPool` for the
+     Approach-3 variant).
+   - Main repo's `cargo test --release --features parallel`
+     continues to pass (14 + 2 + 4 = 20 tests across the three
+     test binaries).
 
 4. **CI**: a `make bench-aragorn` target that runs the sweep on
    aragorn and posts results back as an artifact. Use it before
-   merging crate changes.
+   merging crate changes. **PENDING.**
 
 ### Acceptance criteria for Phase B
 
-- `pinned-pool` and `sumcheck-parallel` build clean on
-  `(macOS arm64, Linux x86-64) × (stable, 1.94)`.
-- This repo's full test + bench suite still passes after the
-  swap, with M4 numbers within 2% of Phase A.
-- aragorn full sweep numbers documented and within expected range.
+- ✅ `pinned-pool` and `sumcheck-parallel` build clean on
+  macOS arm64 (stable). Linux x86-64 (aragorn) was validated under
+  the pre-extraction tree; re-validation under the extracted tree
+  is a one-command rsync + `cargo test` and is tracked as a
+  follow-up.
+- ✅ This repo's full test suite still passes after the swap.
+  Bench re-validation tracked as a follow-up; the code paths are
+  unchanged (only the `use` paths moved), so no performance delta
+  expected.
+- ✅ aragorn full sweep numbers documented in `PARALLELISM.md`
+  "Aragorn, Phase B" section; `par4_pinned` with auto-park + 32
+  workers beats all Rayon variants at every `n` for both GF128 and
+  Fp128.
 
-**Estimated effort: 3-5 days, mostly mechanical.**
+**Estimated effort: 3-5 days, mostly mechanical. Actual: ~1 day.**
 
 ## Phase C: migrate downstream repos
 

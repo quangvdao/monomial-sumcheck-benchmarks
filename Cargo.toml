@@ -29,13 +29,11 @@ paste = "1.0.15"
 rayon = { version = "1", optional = true }
 chili = { version = "0.2", optional = true }
 
-# Linux-only: used by the PinnedPool platform shim to call
-# `sched_setaffinity` (one thread per physical core) and, under the
-# opt-in `SUMCHECK_PINNED_SCHED_FIFO` env var, `sched_setscheduler`
-# (SCHED_FIFO, requires CAP_SYS_NICE). macOS uses a different code
-# path (QoS) and doesn't need libc.
-[target.'cfg(target_os = "linux")'.dependencies]
-libc = "0.2"
+# Extracted, reusable parallel sumcheck primitives. Both crates live at
+# `~/Documents/SNARKs/*` for now; will move to git remotes once the
+# APIs stabilize (see `docs/plans/sumcheck-parallel-productionization.md`).
+pinned-pool = { path = "../../SNARKs/pinned-pool" }
+sumcheck-parallel = { path = "../../SNARKs/sumcheck-parallel" }
 
 [features]
 default = []
@@ -67,4 +65,16 @@ harness = false
 [[bench]]
 name = "sumcheck_parallel"
 harness = false
+required-features = ["parallel"]
+
+[[example]]
+name = "par4_ab"
+required-features = ["parallel"]
+
+[[example]]
+name = "par4_repro"
+required-features = ["parallel"]
+
+[[example]]
+name = "rayon_compare"
 required-features = ["parallel"]

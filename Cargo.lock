@@ -738,13 +738,14 @@ dependencies = [
  "chili",
  "criterion",
  "hachi-pcs",
- "libc",
  "p3-baby-bear",
  "p3-field",
  "p3-koala-bear",
  "paste",
+ "pinned-pool",
  "rand 0.8.5",
  "rayon",
+ "sumcheck-parallel",
 ]
 
 [[package]]
@@ -966,6 +967,13 @@ name = "pin-project-lite"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
+
+[[package]]
+name = "pinned-pool"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "plotters"
@@ -1266,6 +1274,13 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
+
+[[package]]
+name = "sumcheck-parallel"
+version = "0.1.0"
+dependencies = [
+ "pinned-pool",
+]
 
 [[package]]
 name = "syn"
