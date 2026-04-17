@@ -1,0 +1,22 @@
+# Benchmarking repo: we know the target CPU at build time, so compile
+# for it directly. This is what unlocks binius-field's SIMD code
+# paths for GF(2^128) on x86_64:
+#
+#   baseline x86_64           -> portable u128 scalar multiply
+#   +pclmulqdq                -> arch/x86_64/packed_ghash_128 (PCLMULQDQ)
+#   +vpclmulqdq +avx2         -> arch/x86_64/packed_ghash_256 (VPCLMULQDQ 256-bit)
+#   +vpclmulqdq +avx512f      -> arch/x86_64/packed_ghash_512 (VPCLMULQDQ 512-bit)
+#
+# `target-cpu=native` picks whichever is best for the build host.
+# On aragorn (AMD Zen 5, Ryzen 9 9950X) this turns on the full
+# AVX-512 + VPCLMULQDQ path (4x 128-bit carryless mul per SIMD op).
+# See `PARALLELISM.md` and `docs/plans/sumcheck-parallel-productionization.md`.
+#
+# aarch64 (M4 Max dev box) already has NEON `pmull` in the baseline
+# target, so no override is needed there.
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "target-cpu=native"]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "target-cpu=native"]
