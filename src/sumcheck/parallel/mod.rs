@@ -24,5 +24,7 @@
 //!   `PARALLELISM.md` comparison table. Frozen; do not extend.
 
 pub mod legacy;
+pub mod pool;
 
 pub use legacy::*;
+pub use pool::PinnedPool;

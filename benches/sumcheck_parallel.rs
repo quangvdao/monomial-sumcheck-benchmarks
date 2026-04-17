@@ -103,7 +103,7 @@ fn bench_dispatch_floor(c: &mut Criterion) {
     // Warm up the pool first so the lazy `OnceLock` init doesn't taint
     // the first sample. Sweep across active-worker counts so we can see
     // how the barrier cost scales with contention.
-    let pool = monomial_sumcheck_benchmarks::sumcheck::pinned_pool();
+    let pool = monomial_sumcheck_benchmarks::sumcheck::PinnedPool::global();
     pool.broadcast_scoped(pool.n_workers(), &|_| {});
     for k in [2usize, 4, 8]
         .iter()
