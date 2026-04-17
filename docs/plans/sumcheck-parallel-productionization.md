@@ -17,7 +17,7 @@ two further optimizations (D1 tournament reduce, D2 per-round
 ## Locked decisions
 
 1. **Crate ownership.** Local sibling repos under
-   `~/Documents/Research/`. Private GitHub remotes only.
+   `~/Documents/SNARKs/`. Private GitHub remotes only.
    No crates.io publishing. Path dependencies between crates.
 2. **API shape.** Field-agnostic via a `SumcheckRound` trait. Ship
    reference impls for GF128 and Fp128 first; expand to BN254, BB ext,
@@ -243,7 +243,7 @@ dependencies.
 
 ### Tasks
 
-1. **Create `~/Documents/Research/pinned-pool/`** as a new git repo.
+1. **Create `~/Documents/SNARKs/pinned-pool/`** as a new git repo.
    - Cargo crate, library only.
    - Move `pool.rs` + `pool/platform/*` from this repo.
    - Public API:
@@ -268,7 +268,7 @@ dependencies.
    - CI: GitHub Actions matrix `(macos-latest, ubuntu-latest) x
      (stable, 1.94)`. No nightly.
 
-2. **Create `~/Documents/Research/sumcheck-parallel/`.**
+2. **Create `~/Documents/SNARKs/sumcheck-parallel/`.**
    - Cargo crate, library only.
    - Depends on `pinned-pool` (path dep).
    - Move `field.rs` + `scheduler.rs` from this repo.
@@ -294,7 +294,9 @@ dependencies.
 
 3. **Update this repo to depend on the new crates.**
    - Replace `src/sumcheck/parallel/` with `[dev-dependencies]
-     sumcheck-parallel = { path = "../../sumcheck-parallel" }`.
+     sumcheck-parallel = { path = "../../SNARKs/sumcheck-parallel" }`.
+     (This repo lives in `~/Documents/Research/`; the new crates live
+     in `~/Documents/SNARKs/` alongside binius64, hachi, etc.)
    - The repo continues to host the GF128/Fp128/BN254/BB ext kernels
      (those stay sequential and codegen-tuned), plus the bench harness
      calling `sumcheck-parallel`.
@@ -325,7 +327,8 @@ with the new crates.
 - Current logic: `if log_half < PAR_THRESHOLD { sequential } else
   { rayon::par_iter ... }` (size gate at log_half=18).
 - Action:
-  1. Add `sumcheck-parallel = { path = "../../../Research/sumcheck-parallel" }`.
+  1. Add `sumcheck-parallel = { path = "../../../sumcheck-parallel" }`
+     (sibling repo under `~/Documents/SNARKs/`).
   2. Implement `SumcheckRound` for the relevant binius64 kernel.
   3. Replace the `if/else` block with a single
      `par_sumcheck(&mut state, challenges, Some(PinnedPool::global()))`.
