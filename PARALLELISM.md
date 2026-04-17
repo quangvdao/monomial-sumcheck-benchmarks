@@ -873,6 +873,40 @@ fused kernel only; unfused numbers are similar and live in the
 same sweep log. The `max` column is reported in the log too but is
 single-sample and much noisier than p99.)
 
+### A/B on aragorn (Zen 5 9950X, 16c/32t, 2000 samples per cell)
+
+Pinned, fused kernel, same grid, `PINNED_POOL_WORKERS` left at the
+aragorn default (32):
+
+| n  | field | static p50 | guided p50 | Δp50 | static p99 | guided p99 | Δp99 |
+|----|-------|-----------:|-----------:|-----:|-----------:|-----------:|-----:|
+| 10 | gf128 |   46.05 µs |   47.11 µs |  +2% |   52.94 µs |   61.33 µs | +16% |
+| 10 | fp128 |    6.75 µs |    8.15 µs | +21% |    8.49 µs |    9.84 µs | +16% |
+| 12 | gf128 |   54.89 µs |   58.30 µs |  +6% |   69.46 µs |   67.58 µs |  −3% |
+| 12 | fp128 |   12.95 µs |   16.40 µs | +27% |   31.65 µs |   38.28 µs | +21% |
+| 14 | gf128 |  104.63 µs |  115.58 µs | +10% |  110.56 µs |  122.68 µs | +11% |
+| 14 | fp128 |   62.70 µs |   73.16 µs | +17% |   68.60 µs |   78.56 µs | +15% |
+| 16 | gf128 |  369.03 µs |  363.73 µs |  −1% |  378.79 µs |  372.33 µs |  −2% |
+| 16 | fp128 |  209.81 µs |  205.24 µs |  −2% |  215.66 µs |  214.88 µs |  −0% |
+| 18 | gf128 | 1428.99 µs | 1355.96 µs |  **−5%** | 1447.77 µs | 1381.31 µs |  **−5%** |
+| 18 | fp128 |  773.12 µs |  725.29 µs |  **−6%** |  791.57 µs |  761.52 µs |  **−4%** |
+
+(Log: `target/parallelism-results/aragorn-ab-schedule-2026-04.log`.)
+
+The aragorn picture is different from the laptop:
+
+- **Small/medium n (≤ 14) favors static** by 2-27% on p50, similar
+  to M4 Max. Atomic cost dominates when per-worker work per round
+  is sub-µs.
+- **Large n (≥ 16) flips**: guided wins p50 by 1-6%. On dedicated
+  Zen 5 cores there's no preemption tail to talk about, and the
+  mean gap between workers grows with n (per-round NUMA /
+  scheduler noise, `pick_n_workers` shrinking). Dynamic chunking
+  absorbs that imbalance; static eats it on the barrier.
+- **Tail (p99) is basically tied** once n ≥ 16. Guided's big
+  M4 Max tail win came from preemption defense, which Zen 5 with
+  dedicated cores doesn't need.
+
 ### Pattern
 
 - **Mean overhead (p50)**: 3-40% cost at large n (16, 18); 11-88%
@@ -894,23 +928,78 @@ single-sample and much noisier than p99.)
 
 ### When to pick which
 
-- **Dedicated servers (aragorn, production prover fleets)**:
-  `Schedule::Static` (default). The pool already has exclusive
-  cores, so there's no preemption tail to protect against; guided
-  just pays the atomic overhead for near-zero benefit.
+- **Dedicated servers, small/medium n (aragorn sumchecks with
+  n ≤ 14)**: `Schedule::Static` (default). No preemption tail, and
+  the atomic cost dominates when per-round per-worker work is
+  sub-µs. Measured overhead: 6-27% p50 vs static.
+
+- **Dedicated servers, large n (aragorn sumchecks with n ≥ 16)**:
+  `Schedule::guided()`. Worker-to-worker drift grows with work
+  size even without preemption (NUMA noise, `pick_n_workers`
+  transitions), and guided's dynamic chunking absorbs it. Measured
+  advantage: 1-6% p50 at `n ∈ {16, 18}`.
 
 - **Shared / interactive machines (laptops, CI containers, dev
-  VMs)**: `Schedule::guided()`. p99 and max are what the end user
-  feels; for `n ≥ 16` the mean cost is single-digit percent and
-  the tail is 3-10× better.
+  VMs)**: `Schedule::guided()` across the board for `n ≥ 12`. p99
+  and max are what the end user feels; for `n ≥ 16` the mean cost
+  is single-digit percent and the tail is 3-10× better (see M4 Max
+  table above).
 
 - **Latency-critical services (SLO on 99th percentile)**: guided
   always. The mean cost is dwarfed by what you'd lose if even 1%
   of requests are tail-slow.
 
 - **Uncertain / mixed deployments**: start with static; switch to
-  guided at the first sign of p99 regressions. The API cost is
-  one enum variant per call-site.
+  guided at the first sign of p99 regressions or once the typical
+  `n` crosses 16. The API cost is one enum variant per call-site.
+
+### Pinned (either schedule) vs rayon on aragorn
+
+Fresh rayon_compare run 2026-04 (Zen 5 9950X, 32 threads in both
+pools, sequential-burst isolation per variant, no interleaving with
+itself):
+
+**GF128**
+
+| n  | pinS / µs | pinG / µs | rayon_scope / µs | rayon_iter / µs | best pinned / best rayon |
+|----|----------:|----------:|-----------------:|----------------:|-------------------------:|
+| 10 |    46.36  |    48.61  |          209.78  |        210.49   |         **0.22×** (4.5× faster) |
+| 12 |    59.36  |    66.36  |          310.77  |        336.47   |         **0.19×** (5.2× faster) |
+| 14 |    85.64  |   118.29  |          417.08  |        428.15   |         **0.21×** (4.9× faster) |
+| 16 |   498.97  |   531.30  |          799.04  |        857.32   |         **0.62×** (1.6× faster) |
+| 18 |  1920.17  |  1979.17  |         1998.99  |       2337.63   |         **0.96×** (1.04× faster) |
+| 19 |  3852.54  |  3976.32  |         3609.12  |       4622.62   |         1.07× (pinned is **4% slower**) |
+| 20 |  7807.91  |  8050.83  |         8125.07  |       8667.03   |         **0.96×** (1.04× faster) |
+
+**Fp128**
+
+| n  | pinS / µs | pinG / µs | rayon_scope / µs | rayon_iter / µs | best pinned / best rayon |
+|----|----------:|----------:|-----------------:|----------------:|-------------------------:|
+| 10 |    10.89  |    12.16  |          139.93  |        204.41   |         **0.08×** (12.9× faster) |
+| 12 |    10.50  |    16.94  |          194.64  |        269.66   |         **0.05×** (18.5× faster) |
+| 14 |    52.69  |    85.41  |          284.01  |        398.22   |         **0.19×** (5.4× faster) |
+| 16 |   149.80  |   218.47  |          449.14  |        638.51   |         **0.33×** (3.0× faster) |
+| 18 |   498.07  |   717.72  |         1003.76  |       1332.33   |         **0.50×** (2.0× faster) |
+| 20 |  5249.48  |  6214.59  |         4734.95  |       5544.94   |         1.11× (pinned is **10% slower**) |
+
+(Log: `target/parallelism-results/aragorn-rayon-compare-2026-04.log`.)
+
+**Two rows where pinned trails rayon** (marked `!` in the raw log):
+
+- GF128 n=19: pinS 3852 µs vs rayon_scope 3609 µs (−6%). Isolated
+  outlier; n=18 and n=20 are both wins. Likely D2 hits a
+  `pick_n_workers` plateau that doesn't match the `2^19` pair
+  count for a round or two.
+- Fp128 n=20: pinS 5249 µs vs rayon_scope 4734 µs (−10%). At
+  n=20 Fp128 we're hitting the L3 bandwidth ceiling on the bind
+  sweep and rayon's splitter happens to chunk it better.
+
+Both are edges, not ranges. The "always beat rayon at every scale"
+mandate holds for `n ∈ [10, 18]` and `n = 20` GF128; the Phase B
+follow-up for these two cells is (a) a `pick_n_workers` table entry
+for `n = 19` and (b) benchmarking at `PINNED_POOL_WORKERS=16`
+(physical cores only) at `n = 20` Fp128 to see if cutting SMT helps
+the bind-sweep bandwidth contention.
 
 ### Future schedules
 
