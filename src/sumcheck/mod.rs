@@ -45,6 +45,9 @@ mod bb_ext;
 mod bb5_packed;
 mod gf128;
 
+#[cfg(feature = "parallel")]
+mod parallel;
+
 pub use data::*;
 pub use generic::*;
 pub use bn254::*;
@@ -52,3 +55,6 @@ pub use fp128::*;
 pub use bb_ext::*;
 pub use bb5_packed::*;
 pub use gf128::*;
+
+#[cfg(feature = "parallel")]
+pub use parallel::*;

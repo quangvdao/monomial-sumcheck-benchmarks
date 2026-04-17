@@ -24,6 +24,19 @@ ark-bn254 = { git = "https://github.com/quangvdao/arkworks-algebra", rev = "8221
 ark-ff = { git = "https://github.com/quangvdao/arkworks-algebra", rev = "8221f4df9673c59b7f1bde82f483d73a36d5b00f" }
 paste = "1.0.15"
 
+# Optional: only pulled in when the `parallel` feature is enabled, so the
+# default build of the library stays rayon-free.
+rayon = { version = "1", optional = true }
+chili = { version = "0.2", optional = true }
+
+[features]
+default = []
+# Enables the parallel sumcheck wrappers in `src/sumcheck/parallel.rs` and
+# the `sumcheck_parallel` bench. Required by `cargo bench --bench sumcheck_parallel`.
+parallel = ["dep:rayon"]
+# Enables chili-based variants (Phase 2). Pulls chili in addition to rayon.
+parallel_chili = ["parallel", "dep:chili"]
+
 [profile.bench]
 lto = "thin"
 
@@ -42,3 +55,8 @@ harness = false
 [[bench]]
 name = "sumcheck"
 harness = false
+
+[[bench]]
+name = "sumcheck_parallel"
+harness = false
+required-features = ["parallel"]

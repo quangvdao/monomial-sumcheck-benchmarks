@@ -14,7 +14,7 @@ fn gf2_128_reduce_u128(mut t0: u128, t1: u128) -> u128 {
 }
 
 #[cfg(target_arch = "aarch64")]
-struct GF128Accum {
+pub(super) struct GF128Accum {
     low: uint64x2_t,
     mid: uint64x2_t,
     high: uint64x2_t,
@@ -23,7 +23,7 @@ struct GF128Accum {
 #[cfg(target_arch = "aarch64")]
 impl GF128Accum {
     #[inline(always)]
-    fn zero() -> Self {
+    pub(super) fn zero() -> Self {
         unsafe {
             Self {
                 low: vdupq_n_u64(0),
@@ -34,7 +34,7 @@ impl GF128Accum {
     }
 
     #[inline(always)]
-    fn fmadd(&mut self, a: GF128, b: GF128) {
+    pub(super) fn fmadd(&mut self, a: GF128, b: GF128) {
         unsafe {
             let a_val = a.val();
             let b_val = b.val();
@@ -54,7 +54,7 @@ impl GF128Accum {
         }
     }
 
-    fn reduce(self) -> GF128 {
+    pub(super) fn reduce(self) -> GF128 {
         unsafe {
             let mid: u128 = std::mem::transmute(self.mid);
             let high: u128 = std::mem::transmute(self.high);
@@ -67,23 +67,23 @@ impl GF128Accum {
 }
 
 #[cfg(not(target_arch = "aarch64"))]
-struct GF128Accum {
+pub(super) struct GF128Accum {
     sum: GF128,
 }
 
 #[cfg(not(target_arch = "aarch64"))]
 impl GF128Accum {
     #[inline(always)]
-    fn zero() -> Self {
+    pub(super) fn zero() -> Self {
         Self { sum: GF128::ZERO }
     }
 
     #[inline(always)]
-    fn fmadd(&mut self, a: GF128, b: GF128) {
+    pub(super) fn fmadd(&mut self, a: GF128, b: GF128) {
         self.sum += a * b;
     }
 
-    fn reduce(self) -> GF128 {
+    pub(super) fn reduce(self) -> GF128 {
         self.sum
     }
 }

@@ -246,23 +246,23 @@ pub fn sumcheck_deg2_eq_gruen_projective_1inf_fp128(
     }
 }
 
-struct Fp128Accum([u128; 4]);
+pub(super) struct Fp128Accum([u128; 4]);
 
 impl Fp128Accum {
     #[inline(always)]
-    fn zero() -> Self {
+    pub(super) fn zero() -> Self {
         Self([0u128; 4])
     }
 
     #[inline(always)]
-    fn fmadd(&mut self, a: Fp128, b: Fp128) {
+    pub(super) fn fmadd(&mut self, a: Fp128, b: Fp128) {
         let product = a.mul_wide(b);
         for i in 0..4 {
             self.0[i] += product[i] as u128;
         }
     }
 
-    fn reduce(self) -> Fp128 {
+    pub(super) fn reduce(self) -> Fp128 {
         let mut limbs = [0u64; 5];
         let mut carry: u128 = 0;
         for i in 0..4 {
