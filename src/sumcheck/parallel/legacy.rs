@@ -53,9 +53,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use criterion::black_box;
 use rayon::prelude::*;
 
-use super::fp128::Fp128Accum;
-use super::gf128::GF128Accum;
-use super::{Fp128, GF128};
+use super::super::fp128::Fp128Accum;
+use super::super::gf128::GF128Accum;
+use super::super::{Fp128, GF128};
 
 use binius_field::Field as _;
 use hachi_pcs::AdditiveGroup as _;
@@ -876,7 +876,7 @@ pub fn sumcheck_deg2_delayed_gf128_par3_persistent(
     let scope_rounds = par3_scope_rounds(initial_pairs, n_workers, n_rounds);
 
     if scope_rounds == 0 {
-        super::gf128::sumcheck_deg2_delayed_gf128(f, g, challenges);
+        super::super::gf128::sumcheck_deg2_delayed_gf128(f, g, challenges);
         return;
     }
 
@@ -977,7 +977,7 @@ pub fn sumcheck_deg2_delayed_gf128_par3_persistent(
     *g = live_g;
 
     if scope_rounds < n_rounds {
-        super::gf128::sumcheck_deg2_delayed_gf128(f, g, &challenges[scope_rounds..]);
+        super::super::gf128::sumcheck_deg2_delayed_gf128(f, g, &challenges[scope_rounds..]);
     }
 }
 
@@ -1000,7 +1000,7 @@ pub fn sumcheck_deg2_delayed_fp128_par3_persistent(
     let scope_rounds = par3_scope_rounds(initial_pairs, n_workers, n_rounds);
 
     if scope_rounds == 0 {
-        super::fp128::sumcheck_deg2_delayed_fp128(f, g, challenges);
+        super::super::fp128::sumcheck_deg2_delayed_fp128(f, g, challenges);
         return;
     }
 
@@ -1092,7 +1092,7 @@ pub fn sumcheck_deg2_delayed_fp128_par3_persistent(
     *g = live_g;
 
     if scope_rounds < n_rounds {
-        super::fp128::sumcheck_deg2_delayed_fp128(f, g, &challenges[scope_rounds..]);
+        super::super::fp128::sumcheck_deg2_delayed_fp128(f, g, &challenges[scope_rounds..]);
     }
 }
 
@@ -1371,7 +1371,7 @@ pub fn sumcheck_deg2_delayed_gf128_par4_pinned(
     let scope_rounds = par3_scope_rounds(initial_pairs, n_workers, n_rounds);
 
     if scope_rounds == 0 || n_workers <= 1 {
-        super::gf128::sumcheck_deg2_delayed_gf128(f, g, challenges);
+        super::super::gf128::sumcheck_deg2_delayed_gf128(f, g, challenges);
         return;
     }
 
@@ -1457,7 +1457,7 @@ pub fn sumcheck_deg2_delayed_gf128_par4_pinned(
     *g = live_g;
 
     if scope_rounds < n_rounds {
-        super::gf128::sumcheck_deg2_delayed_gf128(f, g, &challenges[scope_rounds..]);
+        super::super::gf128::sumcheck_deg2_delayed_gf128(f, g, &challenges[scope_rounds..]);
     }
 }
 
@@ -1488,7 +1488,7 @@ pub fn sumcheck_deg2_delayed_fp128_par4_pinned(
     let scope_rounds = par3_scope_rounds(initial_pairs, n_workers, n_rounds);
 
     if scope_rounds == 0 || n_workers <= 1 {
-        super::fp128::sumcheck_deg2_delayed_fp128(f, g, challenges);
+        super::super::fp128::sumcheck_deg2_delayed_fp128(f, g, challenges);
         return;
     }
 
@@ -1572,6 +1572,6 @@ pub fn sumcheck_deg2_delayed_fp128_par4_pinned(
     *g = live_g;
 
     if scope_rounds < n_rounds {
-        super::fp128::sumcheck_deg2_delayed_fp128(f, g, &challenges[scope_rounds..]);
+        super::super::fp128::sumcheck_deg2_delayed_fp128(f, g, &challenges[scope_rounds..]);
     }
 }
