@@ -314,6 +314,35 @@ extraction.
   path. Separate workstream from parallelism, but the
   `src/sumcheck/gf128.rs` `GF128Accum` abstraction is the right place
   to add an `#[cfg(target_arch = "x86_64")]` branch.
+- ✅ **SMT bandwidth clamp** (added 2026-04). `pick_n_workers` now
+  takes `bytes_per_pair_working_set` (a new const on `SumcheckRound`)
+  and clamps to `physical_core_count()` once the working set
+  overflows `2 MiB × physical_cores`. Diagnoses the n ≥ 21 cliff
+  on Aragorn where SMT siblings start fighting for shared L2 ports.
+  Validation: Fp128 now beats rayon at every `n ∈ [10, 26]`.
+  GF128 large-n still trails rayon (separate phenomenon, see below).
+
+### Phase B follow-ups still open
+
+- **GF128 large-n loss vs rayon** (n ≥ 21 on Aragorn, ~17-75%
+  slower). The bandwidth clamp shaved 30% off the cliff but did
+  not close the gap. Pool-size sweep
+  (`target/parallelism-results/aragorn-pool-size-cliff-2026-04.log`)
+  shows the gap persists at every pool size we tried (8, 12, 16,
+  20, 24, 32). Suspect rayon's work-stealing handles cache-miss
+  latency interleaving differently than our static phase-major
+  schedule. Next investigation: profile a single GF128 n=21 call
+  under both runtimes and compare ipc / L2 miss / dram bandwidth
+  via `perf stat -d`. If confirmed, candidates are
+  (a) `Schedule::Steal` (Chase-Lev work-stealing, already a planned
+  Phase B follow-up), (b) per-round chunk reordering so concurrent
+  workers stride differently across the polynomial.
+- **Pool-shrink on bandwidth clamp.** Today the clamp only reduces
+  the dispatch count; the parked workers still hold their pinned
+  logical CPUs and account for ~10-25% measured overhead vs running
+  with `PINNED_POOL_WORKERS=physical` directly. Either shrink the
+  pool when the clamp engages, or move the parked workers to
+  `SCHED_IDLE` so the kernel deprioritises them on the SMT pair.
 
 ## Phase B: extract to standalone crates
 
@@ -372,17 +401,23 @@ dependencies.
    - Public API actually shipped:
      ```rust
      pub trait SumcheckRound { /* reduce_chunk, combine,
-         observe_partial, bind_chunk + 2 const tuning knobs */ }
+         observe_partial, bind_chunk, bind_then_reduce_chunk
+         + 3 const tuning knobs (MIN_PAIRS_PER_WORKER,
+         TARGET_PAIRS_PER_WORKER, BYTES_PER_PAIR_WORKING_SET) */ }
      pub fn par_sumcheck<R: SumcheckRound>(
          round: &R,
          challenges: &[R::Elem],
          pool: &PinnedPool,
          n_workers_initial: usize,
          initial_pairs: usize,
+         use_fused_path: bool,
+         schedule: Schedule,
      ) -> usize; // returns rounds_done
      pub fn pick_n_workers(initial_pairs: usize,
+                           bytes_per_pair_working_set: usize,
                            pool_total: usize,
                            target_pairs_per_worker: usize) -> usize;
+     pub enum Schedule { Static, Guided { granularity: usize } }
      ```
    - Tests: end-to-end property test driving `par_sumcheck` with a
      toy u64-ring round state, comparing output against a

@@ -93,6 +93,11 @@ impl SumcheckRound for Fp128DelayedRound {
 
     const MIN_PAIRS_PER_WORKER: usize = 8;
     const TARGET_PAIRS_PER_WORKER: usize = 256;
+    // Working set per pair = read(f, g) + write(f', g') = 4 × size_of::<Fp128>().
+    // Used by `pick_n_workers` to clamp at physical cores when the
+    // total dataset overflows aggregate L2 (SMT siblings then fight
+    // for shared line-fill buffers / L2 ports).
+    const BYTES_PER_PAIR_WORKING_SET: usize = 4 * std::mem::size_of::<Fp128>();
 
     #[inline]
     fn reduce_chunk(&self, round: usize, lo: usize, len: usize) -> Self::Partial {
@@ -183,6 +188,7 @@ pub fn sumcheck_deg2_delayed_fp128_pinned(
     let pool_total = pool.n_workers();
     let n_workers_initial = pick_n_workers(
         initial_pairs,
+        Fp128DelayedRound::BYTES_PER_PAIR_WORKING_SET,
         pool_total,
         Fp128DelayedRound::TARGET_PAIRS_PER_WORKER,
     );

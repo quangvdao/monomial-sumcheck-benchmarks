@@ -1001,6 +1001,82 @@ for `n = 19` and (b) benchmarking at `PINNED_POOL_WORKERS=16`
 (physical cores only) at `n = 20` Fp128 to see if cutting SMT helps
 the bind-sweep bandwidth contention.
 
+### SMT bandwidth clamp (n ≥ 21 cliff fix)
+
+Extending `rayon_compare` to `n = 26` exposed a sharp performance
+cliff on Aragorn starting at `n = 21` for both kernels: pinned was
+0.46× rayon for GF128 and a similar regression for Fp128. The cause
+is bandwidth-bound regime: once the working set
+`initial_pairs × bytes_per_pair_working_set` overflows aggregate L2
+(Zen 5: 16 MiB total, ~32 MiB once you allow ~2× streaming reuse),
+SMT siblings stop adding throughput. Two threads on one physical
+core then halve each other's line-fill-buffer and L2-port budget,
+turning compute-bound `pclmulqdq` and Fp128 limb arithmetic into
+memory-stall waits. The empirical confirmation was a pool-size
+sweep (`target/parallelism-results/aragorn-pool-size-cliff-2026-04.log`):
+on Fp128 `n = 21`, dropping `PINNED_POOL_WORKERS` from 32 (full SMT)
+to 16 (one worker per physical core) gave a 3.9× speedup
+(22.5 ms → 5.8 ms).
+
+The fix is in `sumcheck-parallel`'s `pick_n_workers`: once
+`initial_pairs × BYTES_PER_PAIR_WORKING_SET` exceeds
+`2 MiB × physical_cores`, clamp the active worker count at the
+physical-core count even though the pool retains its full SMT
+capacity. Compute-bound small/medium problems still see the full
+SMT pool. Bandwidth-bound large problems automatically drop the
+SMT siblings.
+
+Implementation:
+
+- `pinned_pool::physical_core_count()` is now `pub`. Returns the
+  P-core / physical-core count from `sysctlbyname`
+  (`hw.perflevel0.physicalcpu`) on macOS or
+  `/sys/devices/system/cpu/.../thread_siblings_list` on Linux.
+- `SumcheckRound::BYTES_PER_PAIR_WORKING_SET` (no default) is the
+  per-pair byte working set summed across all read+write buffers
+  the impl touches per round. For the GF128/Fp128 deg-2 delayed
+  kernel that's `4 × size_of::<Elem>() = 64 B` (read `f`, read `g`,
+  write `f`, write `g`). A kernel carrying a Gruen `eq` factor
+  would set this to `6 × size_of::<Elem>() = 96 B`.
+- `pick_n_workers` now takes `bytes_per_pair_working_set` and
+  clamps to physical cores when the threshold trips. Hosts where
+  the OS can't expose a physical-core count silently degrade to
+  no clamp and fall back to the original chunk-size formula.
+
+Aragorn validation
+(`target/parallelism-results/aragorn-bandwidth-cap-2mb-2026-04.log`,
+fused kernel, default `Schedule::Static`, pool=32):
+
+| n  | Fp128 pinS µs | rayon_scope µs | best/scope |
+|----|--------------:|---------------:|-----------:|
+| 18 |          511  |           989  | 1.93× ✓    |
+| 19 |         1046  |          1586  | 1.52× ✓    |
+| 20 |         2170  |          2938  | 1.35× ✓    |
+| 21 |         7428  |          8648  | 1.16× ✓    |
+| 22 |        22850  |         24145  | 1.06× ✓    |
+| 23 |        53138  |         54510  | 1.03× ✓    |
+| 24 |       127763  |        130147  | 1.02× ✓    |
+| 25 |       256955  |        263688  | 1.03× ✓    |
+| 26 |       495067  |        499790  | 1.01× ✓    |
+
+Fp128 now beats rayon at every cell `n ∈ [10, 26]` on Aragorn.
+
+GF128 still trails rayon for `n ≥ 21` even after the clamp:
+the clamp shaves 30% off the cliff at `n = 21` (30 ms → 21 ms)
+but rayon comes in at 12 ms because of a *different* effect we
+haven't isolated yet (suspect work-stealing handling of cache-miss
+latency interleaving better than our static phases). Documented
+as a known limitation; the clamp is still strictly better than
+shipping without it (saves the 0.46× cliff, just doesn't claw
+back the gap to rayon).
+
+Caveat: parked workers on SMT siblings still occupy their pinned
+logical CPUs while sleeping. We measured a 10-25% overhead vs
+running with `PINNED_POOL_WORKERS=physical` directly (which has
+no siblings to begin with). Future optimisation, deferred: shrink
+the pool itself when the clamp engages, or switch siblings to
+`SCHED_IDLE` so the kernel deprioritises them on the SMT pair.
+
 ### Future schedules
 
 `Schedule` is designed to accept a `Steal` variant (Chase-Lev-style
