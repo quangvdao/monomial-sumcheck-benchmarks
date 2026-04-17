@@ -339,9 +339,16 @@ dependencies.
      per worker. Spin budget = 1M iterations (~300 µs-1 ms of
      wall-clock) so dispatches within a prover loop stay in the fast
      spin path, while a quiescent pool consumes zero CPU.
+   - ✅ Dispatch-floor + cold-start microbenches shipped as
+     integration tests (`tests/dispatch_floor_hot.rs`,
+     `tests/dispatch_floor_cold.rs`). Hot floor on M4 Max: ~600 ns
+     at k=2, ~1.3 µs at k=4, ~3.5 µs at k=8 (vs ~22 µs for
+     `rayon::scope`). Cold-start on macOS: p50 17 µs at k=2
+     scaling to 2.3 ms at k=8 because QoS-parked workers wake
+     through the OS scheduler; on Linux this drops to µs-range
+     (aragorn numbers in PARALLELISM.md). Irrelevant for tight
+     prover loops which never idle past the 1 M spin budget.
    - Remaining work before extracting to a git remote:
-     - Sibling crate for integration tests at `tests/integration.rs`.
-     - Dispatch-floor + cold-start microbenches.
      - GitHub Actions matrix `(macos-latest, ubuntu-latest) x
        (stable, 1.95)`. No nightly.
 
