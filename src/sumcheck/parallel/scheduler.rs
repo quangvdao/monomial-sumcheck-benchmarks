@@ -193,6 +193,21 @@ fn run_phase<R>(
     // Phase-local barriers. Reset on every phase entry; the
     // `broadcast_scoped` itself joins all workers before returning,
     // so the previous phase's atomics cannot leak into this one.
+    //
+    // The reduce uses a single linear aggregate on worker 0 (step 2
+    // of the Approach-4 protocol). We tried a `log2(n_workers)`
+    // tournament reduce (D1 in the plan doc) and it was a **net
+    // loss** across the GF128/Fp128 deg-2 sweep: +3-22% wall-time at
+    // n=12..16 on M4 Max. Root cause: our `Partial` is only 48 bytes
+    // and `combine` is ~3 ns; the three extra Release-RMWs on
+    // per-level `fetch_add` counters cost ~300 ns on the critical
+    // path and completely drown out the ~30 ns × (n_workers - 1)
+    // cross-core load savings that D1 targets. D1 only makes sense
+    // for kernels with much larger or much more expensive partials;
+    // we re-evaluate if/when such a kernel lands in `impls/`.
+    //
+    // See `docs/notes/parallelism-design-discussion.md` §1a and
+    // `PARALLELISM.md` for the negative-result trace.
     let reduce_counter = AtomicUsize::new(0);
     let bind_go = AtomicUsize::new(0);
 

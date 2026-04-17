@@ -29,6 +29,14 @@ paste = "1.0.15"
 rayon = { version = "1", optional = true }
 chili = { version = "0.2", optional = true }
 
+# Linux-only: used by the PinnedPool platform shim to call
+# `sched_setaffinity` (one thread per physical core) and, under the
+# opt-in `SUMCHECK_PINNED_SCHED_FIFO` env var, `sched_setscheduler`
+# (SCHED_FIFO, requires CAP_SYS_NICE). macOS uses a different code
+# path (QoS) and doesn't need libc.
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
 [features]
 default = []
 # Enables the parallel sumcheck wrappers in `src/sumcheck/parallel.rs` and

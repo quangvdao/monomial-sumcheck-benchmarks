@@ -5,14 +5,32 @@ sumcheck kernels can be parallelised cheaply enough to beat the sequential
 baseline at small problem sizes (`n ≈ 8-10`), not just at the paper's `n = 24`
 headline point.
 
-## Machine / configuration
+## Machines / configuration
+
+Primary dev box (most results):
 
 - Apple M4 Max, 16-core (12 P + 4 E), 64 GB RAM.
 - macOS 25.4.0, release build with `lto = "thin"`, `rayon 1`, `chili 0.2.1`.
 - Default rayon pool: 16 threads. No RAYON_NUM_THREADS pinning.
+- `PinnedPool` workers tagged `QOS_CLASS_USER_INTERACTIVE` (macOS
+  doesn't expose affinity; QoS is the canonical P-core anchor).
+
+Linux validation box ("aragorn", added Phase A):
+
+- AMD Ryzen 9 9950X, 16 physical cores × 2 SMT, 1 socket.
+- Ubuntu 24.04.3, kernel 6.17. rustc 1.95.0.
+- `PinnedPool` workers `sched_setaffinity`'d to one logical thread per
+  physical core (canonical = lowest sibling from
+  `/sys/devices/system/cpu/cpu*/topology/thread_siblings_list`). See
+  `src/sumcheck/parallel/pool/platform.rs` and the **Aragorn
+  validation** section below for numbers.
+
+Common:
+
 - `bench_args = --warm-up-time 2 --measurement-time 4` (100 samples)
-  for the original prototype; **Phase A** (`bench-phaseA-2026-04.log`)
-  uses `--warm-up-time 3 --measurement-time 6` to fight variance.
+  for the original prototype; **Phase A** (`bench-phaseA-2026-04.log`
+  and `aragorn-bench-2026-04.log`) uses
+  `--warm-up-time 3 --measurement-time 6` to fight variance.
 - Criterion reports `[low median high]`; numbers below are **median**.
 - `SUMCHECK_PINNED_WORKERS` unset (Approach 4 picks `min(available_parallelism(), 8) = 8`).
 - Phase-A code lives in `src/sumcheck/parallel/{pool,scheduler,field,impls}/`;
@@ -142,6 +160,50 @@ Ablation (same A/B setup, `examples/par4_ab.rs`):
    addition. Not worth further optimization at this layer — the API
    needs to be field-agnostic for the production goal.
 
+### D1 tournament reduce: negative result
+
+We tried the `log2(n_workers)` tournament reduce (D1 in the
+productionization plan) in `run_phase` to distribute the aggregate
+across workers and save the `~n_workers` cross-core cache-line pulls
+that worker 0 does today. It was a **net loss** for every point in
+the GF128/Fp128 sweep on M4 Max:
+
+| n  | field  | LEGACY p10 | NEW + D1 p10 | delta |
+|----|--------|------------|--------------|-------|
+| 12 | GF128  | 22.6 µs    | 26.5 µs      | +17%  |
+| 12 | Fp128  | 15.8 µs    | 19.3 µs      | +22%  |
+| 14 | GF128  | 75.4 µs    | 80.6 µs      |  +7%  |
+| 14 | Fp128  | 41.7 µs    | 50.6 µs      | +21%  |
+| 16 | GF128  | 276 µs     | 285 µs       |  +3%  |
+| 16 | Fp128  | 119 µs     | 126 µs       |  +6%  |
+
+Root cause: `Partial = (GF128, GF128, GF128)` is 48 bytes and
+`combine` is three XORs (~3 ns). With `n_workers = 8` the tree has
+three levels; each level uses one `fetch_add(Release)` on a shared
+`AtomicUsize` to signal completion. Those three Release-RMWs on the
+critical path cost ~100 ns each on M4 Max (cache-line ownership
+transfer + store buffer drain), for a total of ~300 ns per round.
+Meanwhile the "savings" (~30 ns × 7 remote-line loads ≈ 210 ns in
+the limit, much less in practice because M4 Max's mesh + aggressive
+prefetch get an 8-line linear scan to < 150 ns) don't cover it.
+
+Tournament reduce is worth revisiting in two scenarios:
+
+1. **Hardware with much higher cross-cluster latency.** On Zen 5
+   (aragorn) or multi-socket Intel, the `n_workers = 8` linear
+   reduce crosses more shared caches and the trade may flip.
+2. **Kernels with expensive combines.** Packed BB5, KB5 sumchecks,
+   or any partial that holds an `eq` factor alongside the polynomial
+   evaluations will have `combine` taking tens of ns instead of 3 ns.
+   At that point the `combine` distribution dominates the barrier
+   cost and the tournament wins.
+
+For now the scheduler keeps the linear reduce. The trait's
+`combine` method stays associative-commutative so we can switch in
+a tournament implementation later without changing any `impl
+SumcheckRound`. See `docs/plans/sumcheck-parallel-productionization.md`
+for the re-evaluation criteria.
+
 ### Absolute numbers (Phase A, current code)
 
 Criterion medians from `target/parallelism-results/bench-phaseA-2026-04.log`
@@ -211,6 +273,143 @@ Why `n = 10` still loses, quantitatively:
   barrier below ~30 ns per atomic, which is below the ~50 ns LLC
   round-trip latency on M4 and therefore infeasible without shared-L2
   threads (M4 has one shared L2 per P-core cluster).
+
+## Aragorn validation (Zen 5, Linux)
+
+Cross-platform validation on `aragorn`, the team's Linux test box.
+
+### Machine
+
+- AMD Ryzen 9 9950X, 16 physical cores × 2 SMT = 32 logical threads,
+  single socket.
+- Ubuntu 24.04.3 LTS, kernel 6.17.0-20-generic.
+- rustc 1.95.0 stable; same `--warm-up-time 3 --measurement-time 6`
+  Criterion config; `SUMCHECK_PINNED_WORKERS` unset (pool defaults to
+  `min(available_parallelism, 8) = 8` workers — important: on a
+  16-physical-core box we're using **half the cores by design**; see
+  end of this section).
+- Raw logs in `target/parallelism-results/aragorn-bench-2026-04.log`
+  (Criterion) and `aragorn-ab-2026-04.log` (A/B profiler).
+
+### Linux pinning shim works correctly
+
+`SUMCHECK_PINNED_DEBUG=1 par4_ab` confirms each of the 7 extras lands
+on a distinct physical core (canonical logical cpus 1..7 from
+`/sys/devices/system/cpu/cpu*/topology/thread_siblings_list`). Zen 5
+numbers SMT siblings as `(k, k+16)` for `k ∈ 0..15`; our
+`min(thread_siblings_list)` convention keeps us on the lower 16, one
+thread per physical core. `SCHED_FIFO` opt-in via
+`SUMCHECK_PINNED_SCHED_FIFO=1` is available but disabled for these
+runs (we don't hold `CAP_SYS_NICE` and fall back silently).
+
+### Dispatch floor: 3-5× lower than M4
+
+| Microbench                                        | M4 Phase A | aragorn   |
+|---------------------------------------------------|------------|-----------|
+| `par_iter_sum_num_threads` (rayon)                | 20.5 µs    | 12.6 µs   |
+| `scope_spawn_num_threads_nop` (rayon)             | 19.1 µs    | 21.9 µs   |
+| `chili_scope_join_noop`                           | 164 ns     | 166 ns    |
+| `pinned_pool_broadcast_nop_k2`                    | 131 ns     | **44 ns** |
+| `pinned_pool_broadcast_nop_k4`                    | 296 ns     | **73 ns** |
+| `pinned_pool_broadcast_nop_k8`                    | 1.20 µs    | **103 ns**|
+
+Aragorn's unified L3 across all 16 cores + lower cross-core latency
+drops our dispatch floor by 3-11× at `k ∈ {2, 4, 8}`. The pinned pool
+at `k = 8` dispatches in ~100 ns; that's **120× cheaper than
+`par_iter_sum_num_threads`** on the same box.
+
+### A/B: NEW (trait + D2) vs LEGACY single-broadcast
+
+Same test as `examples/par4_ab.rs`, 3000 iterations, alternating calls.
+Unlike M4 (where the trait path cost ~4% over the hand-tuned
+legacy wrapper), on aragorn the **trait + D2 path beats the legacy
+single-broadcast path** at every point where parallelism matters:
+
+| n  | field  | NEW p50  | LEG p50  | Δ p50     |
+|----|--------|----------|----------|-----------|
+| 12 | GF128  | 116.85   | 119.22   | **-2.0%** |
+| 12 | Fp128  | 13.40    | 13.39    |  0%       |
+| 13 | GF128  | 130.44   | 139.71   | **-6.6%** |
+| 13 | Fp128  | 31.78    | 39.34    | **-19.2%**|
+| 14 | GF128  | 255.34   | 256.60   | -0.5%     |
+| 14 | Fp128  | 39.91    | 40.30    | -1.0%     |
+| 15 | GF128  | 511.80   | 534.13   | **-4.2%** |
+| 15 | Fp128  | 75.90    | 95.29    | **-20.4%**|
+| 16 | GF128  | 1010     | 1006     | +0.4%     |
+| 16 | Fp128  | 145.85   | 146.21   | -0.2%     |
+
+The big wins at odd n (n=13, 15 for Fp128) are exactly where D2's
+phase-halving schedule fires: at n=13 the trip from 4096 pairs to
+32 pairs takes 7 halving steps, and D2 drops `n_active` from 8 → 4 →
+2 → 1 along the way instead of paying 8-way barrier latency on the
+last round before the sequential tail. That's what the trait +
+scheduler rewrite was designed for, and Zen 5 benefits from it more
+than M4 because cross-core barriers are relatively more expensive on
+a 16-core mesh than on M4's P-core cluster.
+
+### Absolute numbers (Criterion medians)
+
+GF128 is CPU-bound on a scalar `u128` software multiply path on
+aragorn (no `pclmulqdq` SIMD backend yet), so absolute GF128 numbers
+are ~10× slower than M4 Max NEON. That's a known gap tracked
+separately from parallelism work; the per-variant speedup columns
+still show how the parallel scheduler scales.
+
+#### GF128 (aragorn, µs for n ≤ 14, ms for n ≥ 16)
+
+| n  | `delayed` | `par4_pinned` | speedup | next-best variant   |
+|----|-----------|---------------|---------|---------------------|
+| 10 | 96.3      | **50.3**      | 1.92×   | all others ≥ 97 µs  |
+| 12 | 385       | **95.8**      | 4.02×   | par1_scope 297.8 µs |
+| 14 | 1543      | **207**       | 7.45×   | par1_scope 461 µs   |
+| 16 | 6.67 ms   | **807 µs**    | 8.26×   | par1_pariter 1.10 ms|
+| 18 | 27.0 ms   | 3.72 ms       | 7.25×   | **par1_scope 3.51 ms** |
+| 20 | 98.9 ms   | 16.2 ms       | 6.10×   | **par1_scope 12.4 ms** |
+
+#### Fp128 (aragorn, µs for n ≤ 16, ms for n ≥ 18)
+
+| n  | `delayed` | `par4_pinned` | speedup | next-best variant   |
+|----|-----------|---------------|---------|---------------------|
+| 10 | 14.8      | **7.11**      | 2.08×   | chili_b128 14.70 µs |
+| 12 | 45.7      | **11.4**      | 4.01×   | delayed itself 45.7 |
+| 14 | 182       | **50.8**      | 3.58×   | chili_b2048 180 µs  |
+| 16 | 733       | **106**       | 6.89×   | par1_scope 430 µs   |
+| 18 | 2.93 ms   | **428 µs**    | 6.86×   | par1_scope 1.01 ms  |
+| 20 | 11.8 ms   | 6.25 ms       | 1.88×   | **par1_scope 5.90 ms** |
+
+### Crossover summary (aragorn vs M4)
+
+| Field | M4 crossover | aragorn crossover |
+|-------|--------------|-------------------|
+| GF128 | n = 12 (1.25×) | **n ≤ 10 (1.92×)** |
+| Fp128 | n = 10 (1.10×) | **n ≤ 10 (2.08×)** |
+
+Aragorn hits the `n = 8-10` crossover target that M4 fell short of.
+The cheaper dispatch floor (103 ns vs 1.2 µs at k=8) is the direct
+cause: the ~1.5-2.5 µs M4 overhead budget at n=10 shrinks to ~0.3 µs
+on aragorn, leaving most of the parallel gain intact.
+
+### Cap at 8 workers is leaving cores on the table at n ≥ 18
+
+At n ∈ {18, 20}, rayon's `par1_scope` (which uses the default rayon
+pool = 16 threads = all 32 logical cores) starts beating
+`par4_pinned` (fixed 8 workers). GF128 n=20: 12.4 ms (par1_scope) vs
+16.2 ms (par4_pinned), -23%. Fp128 n=20: 5.9 ms vs 6.25 ms, -5.6%.
+
+Two options for follow-up (tracked under Phase B in the plan doc):
+
+1. Raise the default cap to `min(physical_cores, 16)`. On aragorn that
+   doubles the pool to 16 and should close or invert the gap at
+   n ≥ 18. On M4 Max it stays at 12 (one per P-core) which is already
+   ≥ 8 with room to grow.
+2. Make D2 more aggressive at the top of the schedule: even with 16
+   workers, dispatch at `k = 16` only when `initial_pairs ≥ 16 ×
+   TARGET_PAIRS_PER_WORKER`, otherwise start at `k = 8`. This keeps
+   the dispatch-floor advantage at small/mid n while unlocking
+   large-n throughput.
+
+Neither blocks Phase A shipping; both are profile-guided tunings on
+top of the current trait + scheduler.
 
 ## Detailed findings
 

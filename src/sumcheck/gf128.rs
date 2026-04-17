@@ -1,5 +1,11 @@
 use super::*;
 
+// Scalar fallback for non-aarch64 builds needs `Field::ZERO` from
+// `binius_field`. On aarch64 (macOS M-class) we use the NEON intrinsics
+// path below and never touch `GF128::ZERO`.
+#[cfg(not(target_arch = "aarch64"))]
+use binius_field::Field;
+
 #[cfg(target_arch = "aarch64")]
 const GF128_POLY: u64 = 0x87;
 

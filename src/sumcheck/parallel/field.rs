@@ -13,7 +13,12 @@
 //!   small `Partial` (e.g. a deg-2 projective triple). Read-only over
 //!   `&self`.
 //! - [`combine`](SumcheckRound::combine): associative+commutative
-//!   merge, used by the scheduler's tournament reduce (D1).
+//!   merge, currently used by the scheduler's linear reduce on
+//!   worker 0. The trait constraint is associative+commutative so
+//!   we can swap in a tournament reduce later without touching any
+//!   `impl` block (D1 in the productionization plan — measured as a
+//!   regression for the current 48-byte deg-2 `Partial` on M4 Max,
+//!   kept as an option for future large-`Partial` kernels).
 //! - [`bind_chunk`](SumcheckRound::bind_chunk): each worker writes its
 //!   chunk of the next-round buffer in-place. The "in-place" is via
 //!   ping-pong: we read from one buffer and write to the other, so

@@ -738,6 +738,7 @@ dependencies = [
  "chili",
  "criterion",
  "hachi-pcs",
+ "libc",
  "p3-baby-bear",
  "p3-field",
  "p3-koala-bear",

@@ -10,9 +10,11 @@
 Extract `PinnedPool` into a standalone crate; build a field-agnostic
 `sumcheck-parallel` crate on top with a small reference matrix
 (GF128, Fp128 first); land Approach-4 parallelism with
-two further optimizations (D1 tournament reduce, D2 per-round
-`n_active` shrinkage); validate on Apple M4 Max + AMD Zen 5
-(aragorn); migrate binius64 → Jolt → hachi.
+D2 per-round `n_active` shrinkage (D1 tournament reduce is
+implemented then shelved as a measured net-loss for the current
+small-`Partial` kernels, kept ready for larger-`combine` fields);
+validate on Apple M4 Max + AMD Zen 5 (aragorn); migrate
+binius64 → Jolt → hachi.
 
 ## Locked decisions
 
@@ -23,10 +25,13 @@ two further optimizations (D1 tournament reduce, D2 per-round
    reference impls for GF128 and Fp128 first; expand to BN254, BB ext,
    KB5, packed BB5 over time as adoption demands. Consumers can
    implement their own kernels against the trait.
-3. **Phase D scope.** D1 (tournament reduce) **and** D2 (per-round
-   `n_active` shrinkage). Both are required because consumers will
-   call sumcheck across MANY shapes and sizes; the static
-   8-or-sequential cliff is too coarse.
+3. **Phase D scope.** D1 (tournament reduce) *was* in scope but was
+   measured as a **net loss** for the current GF128/Fp128 deg-2
+   kernels on M4 Max (see `PARALLELISM.md` → "D1 tournament reduce:
+   negative result"). Shelved; trait `combine` is still associative
+   so we can add it later when a kernel with an expensive `combine`
+   (packed BB5, KB5, eq-factor variants) makes the trade worthwhile.
+   D2 (per-round `n_active` shrinkage) is in and beneficial.
 4. **Platforms in scope now.** macOS arm64 (M4 Max dev box), Linux
    x86-64 (aragorn: AMD Ryzen 9 9950X, Zen 5, 16C / 32T, no E-cores).
    Windows and BSDs deferred. WASM gracefully no-ops.
@@ -168,10 +173,24 @@ extraction.
    Keep them under their old names so the bench file is
    line-for-line unchanged.
 
-4. **D1: tournament reduce.** In `scheduler.rs`, replace the
-   linear `for slot in partials` aggregation with a pairwise tree.
-   Cost: ~50 LOC. Win: ~100 ns at `k = 8`. Zero-cost at `k = 2` (the
-   tree degenerates to a single combine).
+4. **D1: tournament reduce.** ~~Replace the linear aggregation with
+   a pairwise tree.~~ **Shelved as a measured regression on these
+   kernels** (2026-04-16 A/B). The prototype added per-level
+   `AtomicUsize::fetch_add` barriers; on M4 Max each Release-RMW is
+   ~100 ns on the critical path and three levels of barriers
+   (+~300 ns/round) cost more than the ~200 ns/round the tree saves
+   on cross-core loads for our 48-byte `Partial` + 3-ns `combine`.
+   Regression was +3% (`n=16`) to +22% (`n=12`). See
+   `PARALLELISM.md` → "D1 tournament reduce: negative result" for
+   the full A/B table. Trait `combine` stays associative-commutative
+   so D1 can be re-enabled behind a scheduler switch if a future
+   field's `Partial` or `combine` gets expensive enough. Estimated
+   trigger thresholds: `Partial` ≥ 128 bytes **or** `combine` ≥ 50 ns,
+   **or** target CPU is a multi-socket / multi-cluster box where the
+   linear 8-line scan crosses NUMA domains. Revisit on aragorn (Zen 5,
+   single CCD) once we have the Linux shim running; if Zen 5 shows a
+   similar regression at `k = 8` then D1 is truly a bad fit for all
+   current use cases and we should stop carrying the option at all.
 
 5. **D2: per-round `n_active` shrinkage.** Compute a schedule
    `[n_active_round_0, n_active_round_1, ...]` at scheduler entry.
@@ -198,43 +217,85 @@ extraction.
    computing the schedule + tournament reduce on noop work. We need
    this to track regressions in D1/D2 separately from kernel changes.
 
-7. **Linux platform shim**.
-   - `pool/platform/macos.rs`: existing `pthread_set_qos_class_self_np`
-     code.
-   - `pool/platform/linux.rs`: `sched_setaffinity` to a
-     one-thread-per-physical-core mask (parse `/sys/devices/system/cpu`
-     for SMT topology), optional `SCHED_FIFO` if process has
-     `CAP_SYS_NICE`, `cpufreq` performance governor hint via
-     `/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor` (no
-     hard requirement; document if missing).
-   - `pool/platform/fallback.rs`: no-op; `spin_until_ge` falls back to
-     spin-then-yield (already implemented).
+7. **Linux platform shim.** ✅ Done.
+   `src/sumcheck/parallel/pool/platform.rs` now contains a Linux
+   backend that:
+   - Reads `/sys/devices/system/cpu/possible` and each cpu's
+     `topology/thread_siblings_list`, keeps the smallest sibling in
+     each group, and caches the sorted deduplicated list in a
+     `OnceLock<Vec<usize>>`. On aragorn this yields 16 canonical
+     logical cpus (one per physical core).
+   - Calls `libc::sched_setaffinity(0, sizeof(cpu_set_t), &set)` per
+     worker with a single-bit mask for
+     `canonical_cpus[worker_idx % canonical_cpus.len()]`. Worker 0
+     (main) stays unpinned so it can migrate while doing the
+     reduce / combine.
+   - Optional `libc::sched_setscheduler(SCHED_FIFO, prio=1)` gated on
+     `SUMCHECK_PINNED_SCHED_FIFO=1`; silent no-op on EPERM.
+   - All sysfs / syscall failures fall back to unpinned scheduling
+     (correctness preserved, perf possibly worse).
+   - Debug logging via `SUMCHECK_PINNED_DEBUG=1` prints one line per
+     worker (`[sumcheck-pinned] worker pinned to cpuN`) for on-box
+     sanity-checking.
 
-8. **Test on aragorn.** SSH config already set up
-   (`Hostname 100.100.234.84`, `User omid`). Run:
-   - `cargo test --release --features parallel_chili --test parallel_delayed`
-   - `cargo bench --bench sumcheck_parallel --features parallel_chili -- dispatch_floor`
-   - Full sweep, results checked into
-     `target/parallelism-results/aragorn-bench-2026-04.log` for
-     comparison with M4 Max.
+   Verified on aragorn: workers 1..7 pin to cpu1..cpu7 (the canonical
+   lower-siblings on Zen 5's `(k, k+16)` SMT layout).
 
-   Expected: AMD Zen 5 has different cache-coherence behavior
-   (single-CCD on 9950X) and ~4x lower per-cycle pclmul throughput
-   than M4's NEON, so GF128 sequential will be slower; the relative
-   parallel speedups should be similar or better.
+   `cpufreq` governor hint left for a follow-up: benches on aragorn
+   already hit the expected performance scaling (`schedutil` with
+   boost enabled).
+
+8. **Test on aragorn.** ✅ Done.
+   - `cargo test --release --features parallel_chili` on aragorn:
+     all 14 sumcheck tests + 2 `par4_loop` tests + 4
+     `parallel_delayed` tests pass.
+   - `cargo bench --bench sumcheck_parallel --features parallel_chili
+     -- --warm-up-time 3 --measurement-time 6` saved to
+     `target/parallelism-results/aragorn-bench-2026-04.log`.
+   - `examples/par4_ab` sweep (`n ∈ 10..16`, both fields, 3000 iter)
+     saved to `target/parallelism-results/aragorn-ab-2026-04.log`.
+   - See **Aragorn validation** in `PARALLELISM.md` for the writeup.
+     Highlights:
+     - Dispatch floor 44 / 73 / 103 ns at k = 2 / 4 / 8 (3-11× better
+       than M4 Phase A numbers).
+     - NEW (trait + D2) beats LEGACY single-broadcast by up to -20%
+       (Fp128 n=15); on M4 it cost ~4%. Net positive on Linux.
+     - Crossover at n ≤ 10 for both fields (M4 was n = 12 / 10).
+     - 8-worker cap leaves half of aragorn's 16 cores idle at
+       n ∈ {18, 20}; `par1_scope` (all-core rayon) beats us there.
+       Follow-up (Phase B): raise default pool cap to
+       `min(physical_cores, 16)` and add more steps to the D2
+       shrinkage table.
 
 ### Acceptance criteria for Phase A
 
-- All existing correctness tests still pass on M4 + aragorn.
-- `par4_pinned` GF128 and Fp128 numbers match or beat the current
+- ✅ All existing correctness tests still pass on M4 + aragorn.
+- ✅ `par4_pinned` GF128 and Fp128 numbers match or beat the current
   `PARALLELISM.md` table on M4.
-- D1 microbench shows < 5% regression at `k = 2`, > 50 ns saving at
-  `k = 8`.
-- D2 shows ≥ 10% improvement at GF128 n=14 and Fp128 n=14 vs current
-  cliff-fallback behavior.
-- aragorn benches landed in repo, baseline numbers documented.
+- ~~D1 microbench shows < 5% regression at `k = 2`, > 50 ns saving at
+  `k = 8`.~~ D1 shelved (see Task 4). Revisit on larger-Partial
+  kernels or new hardware.
+- ✅ D2 shows ≥ 10% improvement at GF128 n=14 and Fp128 n=14 vs
+  cliff-fallback behavior (visible in aragorn A/B at n=13, 15).
+- ✅ aragorn benches landed in repo, baseline numbers documented.
 
-**Estimated effort: 3-5 days.**
+**Estimated effort: 3-5 days. Actual: ~2 days.**
+
+### Phase A follow-ups (tracked for Phase B)
+
+- **Raise pool cap to physical_cores.** Currently
+  `min(available_parallelism, 8)`. Aragorn (16 phys × 2 SMT → 8) is
+  leaving 8 cores idle at n ≥ 18 where `par1_scope` wins. Candidate:
+  `min(physical_cores, 16)`.
+- **Extend D2 schedule table.** With a 16-worker pool we want
+  `initial_pairs ≥ 16 × TARGET_PAIRS_PER_WORKER` to dispatch at
+  k = 16; else start at k = 8 and halve from there. Current D2 halves
+  from `max_workers` regardless of problem size.
+- **pclmulqdq backend for GF128 on x86-64.** Aragorn GF128 is ~10×
+  slower than M4 NEON because we fall through to the scalar `u128`
+  path. Separate workstream from parallelism, but the
+  `src/sumcheck/gf128.rs` `GF128Accum` abstraction is the right place
+  to add an `#[cfg(target_arch = "x86_64")]` branch.
 
 ## Phase B: extract to standalone crates
 
@@ -377,8 +438,12 @@ with the new crates.
 
 Already-decided:
 
-- **D1 tournament reduce**: in Phase A.
-- **D2 per-round `n_active` shrinkage**: in Phase A.
+- **D1 tournament reduce**: *attempted in Phase A, shelved as a
+  regression* for the current small-`Partial` GF128/Fp128 kernels
+  (trait `combine` stays associative so D1 can be resurrected
+  behind a scheduler switch for larger-`Partial` fields — see
+  Phase A Task 4 for the re-evaluation criteria).
+- **D2 per-round `n_active` shrinkage**: in Phase A, shipped.
 
 Deferred until a downstream caller needs them:
 
