@@ -1,14 +1,14 @@
-//! Per-call latency profiler for `par4_pinned`. Useful when Criterion's
+//! Per-call latency profiler for `pinned`. Useful when Criterion's
 //! median is being dragged around by long-tail outliers (preemption,
 //! cache cold-starts, etc.) and you want to see the actual distribution.
 //!
 //! ```text
-//! N=16 FIELD=fp128 N_ITER=2000 cargo run --example par4_repro --release \
+//! N=16 FIELD=fp128 N_ITER=2000 cargo run --example pinned_repro --release \
 //!     --features parallel
 //! ```
 //!
 //! Reports p10/p50/p90/p99/min/max wall time per call. Setup (Vec::clone)
-//! is excluded from each sample; only the par4_pinned call is timed.
+//! is excluded from each sample; only the pinned call is timed.
 
 #![cfg(feature = "parallel")]
 
@@ -23,8 +23,12 @@ fn main() {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(500);
+    let use_fused_path = std::env::var("FUSED")
+        .ok()
+        .map(|s| matches!(s.as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false);
 
-    eprintln!("n={n} field={field} n_iter={n_iter}");
+    eprintln!("n={n} field={field} n_iter={n_iter} fused={use_fused_path}");
     eprintln!("warming up pool");
     PinnedPool::global().broadcast_scoped(PinnedPool::global().n_workers(), &|_| {});
 
@@ -38,7 +42,7 @@ fn main() {
             let mut f = f_orig.clone();
             let mut g = g_orig.clone();
             let t = Instant::now();
-            sumcheck_deg2_delayed_fp128_par4_pinned(&mut f, &mut g, &challenges);
+            sumcheck_deg2_delayed_fp128_pinned(&mut f, &mut g, &challenges, use_fused_path);
             let dt = t.elapsed().as_secs_f64() * 1e6;
             samples.push(dt);
             assert_eq!(f.len(), 1);
@@ -51,7 +55,7 @@ fn main() {
             let mut f = f_orig.clone();
             let mut g = g_orig.clone();
             let t = Instant::now();
-            sumcheck_deg2_delayed_gf128_par4_pinned(&mut f, &mut g, &challenges);
+            sumcheck_deg2_delayed_gf128_pinned(&mut f, &mut g, &challenges, use_fused_path);
             let dt = t.elapsed().as_secs_f64() * 1e6;
             samples.push(dt);
             assert_eq!(f.len(), 1);

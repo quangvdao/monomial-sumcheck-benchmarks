@@ -32,23 +32,25 @@ Common:
   and `aragorn-bench-2026-04.log`) uses
   `--warm-up-time 3 --measurement-time 6` to fight variance.
 - Criterion reports `[low median high]`; numbers below are **median**.
-- `SUMCHECK_PINNED_WORKERS` unset (Approach 4 picks `min(available_parallelism(), 8) = 8`).
+- `SUMCHECK_PINNED_WORKERS` unset (`pinned` picks `min(available_parallelism(), 8) = 8`).
 - Phase-A code lives in `src/sumcheck/parallel/{pool,scheduler,field,impls}/`;
   the original prototype is preserved in `src/sumcheck/parallel/legacy.rs`
-  (Approaches 1-3) for historical comparison. Approach 4's per-pair math
+  (`rayon_scope`, `rayon_iter`, `chili`, `persistent`, `pinned_v0`) for
+  historical comparison. `pinned`'s per-pair math
   is shared between the two via `pub(super) fn partial_triple_*` /
   `bind_chunk_*` so the inner loop body is byte-identical.
 
-## Four approaches compared
+## Variants compared
 
-| Label                        | Strategy                                                                                             |
-|------------------------------|------------------------------------------------------------------------------------------------------|
-| `delayed`                    | Sequential baseline (the existing hot kernel).                                                       |
-| `delayed_par1_scope`         | **Approach 1**: one `rayon::scope` per round; `n_workers` manual spawns; fused reduce+bind per worker. |
-| `delayed_par1_pariter`       | Control for Approach 1: `(0..n_workers).into_par_iter()` + `par_chunks_mut`.                         |
-| `delayed_par2_chili_bK`      | **Approach 2**: chili `scope.join` recursion with base-case `K` (sweep `K ∈ {32, 128, 512, 2048}`).  |
-| `delayed_par3_persistent`    | **Approach 3**: one `rayon::scope` for the whole call; persistent workers on ping-pong buffers; atomic-counter barriers with spin-then-yield. |
-| `delayed_par4_pinned`        | **Approach 4**: process-global `PinnedPool` of `std::thread` workers (default 8, tagged `QOS_CLASS_USER_INTERACTIVE` on macOS); per-call doorbell (epoch + done atomics), adaptive `n_active` via `PAR4_TARGET_PAIRS_PER_WORKER = 256`. |
+| Bench label            | Variant         | Strategy                                                                                            |
+|------------------------|-----------------|-----------------------------------------------------------------------------------------------------|
+| `delayed`              | `seq`           | Sequential baseline (the existing hot kernel).                                                      |
+| `delayed_rayon_scope`  | `rayon_scope`   | One `rayon::scope` per round; `n_workers` manual spawns; fused reduce+bind per worker.              |
+| `delayed_rayon_iter`   | `rayon_iter`    | Control for `rayon_scope`: `(0..n_workers).into_par_iter()` + `par_chunks_mut`.                     |
+| `delayed_chili_bK`     | `chili`         | Chili `scope.join` recursion with base-case `K` (sweep `K ∈ {32, 128, 512, 2048}`).                 |
+| `delayed_persistent`   | `persistent`    | One `rayon::scope` for the whole call; persistent workers on ping-pong buffers; atomic-counter barriers with spin-then-yield. |
+| `delayed_pinned`       | `pinned_v0`     | **Frozen A/B baseline** for `pinned`: single `broadcast_scoped`, direct `[SendPtr; 2]` captures, no D2, no trait. Same `PinnedPool`. |
+| `delayed_pinned`       | **`pinned`**    | **Production.** Process-global `PinnedPool` of `std::thread` workers (macOS: `USER_INTERACTIVE` QoS, Linux: `sched_setaffinity`); per-call doorbell (epoch + done atomics); adaptive `n_active` via `PINNED_TARGET_PAIRS_PER_WORKER = 256`; D2 per-round shrinkage; driven by `sumcheck_parallel::par_sumcheck`. |
 
 All parallel variants reuse the same `GF128Accum` / `Fp128Accum` accumulators
 as the sequential kernel, so the hot per-pair loop body matches byte-for-byte.
@@ -76,7 +78,7 @@ per-worker split inbox/outbox cache lines (current code).
 Two things to note:
 
 1. Chili's fork/join is **~140× cheaper** than rayon's per-scope dispatch
-   (164 ns vs 19-23 µs). That explains why Approach 1 (rayon scope per
+   (164 ns vs 19-23 µs). That explains why `rayon_scope` (rayon scope per
    round) is unusable below `n = 18`: any per-round rayon scope pays
    ≥ 19 µs of overhead, larger than the entire sequential sumcheck for
    `n ≤ 12`.
@@ -99,7 +101,7 @@ Two things to note:
 
 The first pass of Phase-A benchmarks recorded Criterion medians in the
 20-300% range above the pre-refactor baseline (e.g. GF128 `n = 16`
-`par4_pinned` went from 52 µs to 94 µs, and `par4_repro` p10 sat at
+`pinned` went from 52 µs to 94 µs, and `pinned_repro` p10 sat at
 272 µs — see the `bench-phaseA-2026-04.log` timestamps). That looked
 like a real regression, but the same Criterion session over the
 pre-refactor code today reproduces the *same* slow numbers: machine
@@ -107,12 +109,12 @@ state (thermal, background load, L1/L2 cold-start) drifted between the
 original benchmark session and the Phase-A session, and the "original"
 numbers are not reproducible on the current box.
 
-The clean A/B test is to add the pre-refactor `par4_pinned` wrapper
-back into the tree (`legacy::sumcheck_deg2_delayed_*_par4_pinned_legacy`,
+The clean A/B test is to add the pre-refactor `pinned` wrapper
+back into the tree (`legacy::sumcheck_deg2_delayed_*_pinned_v0`,
 single `broadcast_scoped`, direct `[SendPtr; 2]` captures, no D2
 multi-phase, no generic trait) and run both wrappers back-to-back on
 the *same* `PinnedPool` and *same* measurement loop
-(`examples/par4_ab.rs`, 2000 iterations, alternating calls to keep
+(`examples/pinned_ab.rs`, 2000 iterations, alternating calls to keep
 thermals / cache state balanced).
 
 Min-of-2000 samples, µs. Lower is better; `NEW` is
@@ -142,7 +144,7 @@ interface for downstream crates. Headline numbers (crossover at
 
 ### Where the 4% residual goes
 
-Ablation (same A/B setup, `examples/par4_ab.rs`):
+Ablation (same A/B setup, `examples/pinned_ab.rs`):
 
 1. **D2 off + ptrs cached** (`const D2_SHRINK: bool = false`) closes
    ~1-2% of the gap at `n ∈ {12..16}` but not at small n where the
@@ -208,16 +210,16 @@ for the re-evaluation criteria.
 
 Criterion medians from `target/parallelism-results/bench-phaseA-2026-04.log`
 (`--warm-up-time 3 --measurement-time 6`, `SUMCHECK_PINNED_WORKERS` unset).
-Criterion numbers are 1.5-3× above the `par4_ab` min because they
+Criterion numbers are 1.5-3× above the `pinned_ab` min because they
 include the long-tail distribution (occasional preemption, cache-cold
 dispatches, etc.) in the point estimate. Absolute values drift 30-60%
 across benchmark sessions on M4 Max even with 3s warm-up + 6s
-measurement; use the `par4_ab` A/B above for code-to-code comparisons,
+measurement; use the `pinned_ab` A/B above for code-to-code comparisons,
 and use the Criterion medians below only for crossover-point detection.
 
 #### GF128 (µs for `n ≤ 16`, ms for `n ∈ {18, 20}`)
 
-| n  | `delayed` | `par4_pinned` (current) | speedup |
+| n  | `delayed` | `pinned` (current) | speedup |
 |----|-----------|-------------------------|---------|
 | 10 | 4.03      | 4.68                    | 0.86×   |
 | 12 | 16.4      | **13.3**                | **1.23×** |
@@ -228,7 +230,7 @@ and use the Criterion medians below only for crossover-point detection.
 
 #### Fp128 (µs for `n ≤ 16`, ms for `n ∈ {18, 20}`)
 
-| n  | `delayed` | `par4_pinned` (current) | speedup |
+| n  | `delayed` | `pinned` (current) | speedup |
 |----|-----------|-------------------------|---------|
 | 10 | 11.8      | **10.8**                | **1.10×** |
 | 12 | 47.8      | **23.6**                | **2.03×** |
@@ -246,10 +248,10 @@ lost by 10% at `n = 10`).
 
 | Field | Winner                              | First n where parallel beats sequential | Best speedup |
 |-------|-------------------------------------|-----------------------------------------|--------------|
-| GF128 | `par4_pinned` for every n ≥ 12      | **n = 12** (1.25× over seq)             | 5.3× at n=18 |
-| Fp128 | `par4_pinned` for every n ≥ 12      | **n = 12** (2.45× over seq)             | 6.6× at n=20 |
+| GF128 | `pinned` for every n ≥ 12      | **n = 12** (1.25× over seq)             | 5.3× at n=18 |
+| Fp128 | `pinned` for every n ≥ 12      | **n = 12** (2.45× over seq)             | 6.6× at n=20 |
 
-Approach 4 moves the crossover from `n = 20 → n = 12` (GF128) and from
+`pinned` moves the crossover from `n = 20 → n = 12` (GF128) and from
 `n = 18 → n = 12` (Fp128), and it wins at **every** `n ≥ 12` across both
 fields. At `n = 10` sequential still wins by ~10%, so the target
 `n ≈ 8-10` crossover is not reached, but we land close to the predicted
@@ -258,7 +260,7 @@ fields. At `n = 10` sequential still wins by ~10%, so the target
 Why `n = 10` still loses, quantitatively:
 
 - GF128 sequential at n=10 is 3.85 µs for the whole 10-round sumcheck.
-- Approach 4 at n=10 selects 2 active workers (`initial_pairs = 512`,
+- `pinned` at n=10 selects 2 active workers (`initial_pairs = 512`,
   `PAIR_TARGET_PER_WORKER = 256`, so `n_active = 512/256 = 2`). The
   inner loop runs ~6 rounds inside one `broadcast_scoped` call (until
   `initial_per_worker >> r < 8`), then finishes the last ~4 rounds
@@ -293,7 +295,7 @@ Cross-platform validation on `aragorn`, the team's Linux test box.
 
 ### Linux pinning shim works correctly
 
-`SUMCHECK_PINNED_DEBUG=1 par4_ab` confirms each of the 7 extras lands
+`SUMCHECK_PINNED_DEBUG=1 pinned_ab` confirms each of the 7 extras lands
 on a distinct physical core (canonical logical cpus 1..7 from
 `/sys/devices/system/cpu/cpu*/topology/thread_siblings_list`). Zen 5
 numbers SMT siblings as `(k, k+16)` for `k ∈ 0..15`; our
@@ -320,7 +322,7 @@ at `k = 8` dispatches in ~100 ns; that's **120× cheaper than
 
 ### A/B: NEW (trait + D2) vs LEGACY single-broadcast
 
-Same test as `examples/par4_ab.rs`, 3000 iterations, alternating calls.
+Same test as `examples/pinned_ab.rs`, 3000 iterations, alternating calls.
 Unlike M4 (where the trait path cost ~4% over the hand-tuned
 legacy wrapper), on aragorn the **trait + D2 path beats the legacy
 single-broadcast path** at every point where parallelism matters:
@@ -368,25 +370,25 @@ speedup columns still show how the parallel scheduler scales.
 
 #### GF128 (aragorn, µs for n ≤ 14, ms for n ≥ 16)
 
-| n  | `delayed` | `par4_pinned` | speedup | next-best variant   |
+| n  | `delayed` | `pinned` | speedup | next-best variant   |
 |----|-----------|---------------|---------|---------------------|
 | 10 | 96.3      | **50.3**      | 1.92×   | all others ≥ 97 µs  |
-| 12 | 385       | **95.8**      | 4.02×   | par1_scope 297.8 µs |
-| 14 | 1543      | **207**       | 7.45×   | par1_scope 461 µs   |
-| 16 | 6.67 ms   | **807 µs**    | 8.26×   | par1_pariter 1.10 ms|
-| 18 | 27.0 ms   | 3.72 ms       | 7.25×   | **par1_scope 3.51 ms** |
-| 20 | 98.9 ms   | 16.2 ms       | 6.10×   | **par1_scope 12.4 ms** |
+| 12 | 385       | **95.8**      | 4.02×   | rayon_scope 297.8 µs |
+| 14 | 1543      | **207**       | 7.45×   | rayon_scope 461 µs   |
+| 16 | 6.67 ms   | **807 µs**    | 8.26×   | rayon_iter 1.10 ms|
+| 18 | 27.0 ms   | 3.72 ms       | 7.25×   | **rayon_scope 3.51 ms** |
+| 20 | 98.9 ms   | 16.2 ms       | 6.10×   | **rayon_scope 12.4 ms** |
 
 #### Fp128 (aragorn, µs for n ≤ 16, ms for n ≥ 18)
 
-| n  | `delayed` | `par4_pinned` | speedup | next-best variant   |
+| n  | `delayed` | `pinned` | speedup | next-best variant   |
 |----|-----------|---------------|---------|---------------------|
 | 10 | 14.8      | **7.11**      | 2.08×   | chili_b128 14.70 µs |
 | 12 | 45.7      | **11.4**      | 4.01×   | delayed itself 45.7 |
 | 14 | 182       | **50.8**      | 3.58×   | chili_b2048 180 µs  |
-| 16 | 733       | **106**       | 6.89×   | par1_scope 430 µs   |
-| 18 | 2.93 ms   | **428 µs**    | 6.86×   | par1_scope 1.01 ms  |
-| 20 | 11.8 ms   | 6.25 ms       | 1.88×   | **par1_scope 5.90 ms** |
+| 16 | 733       | **106**       | 6.89×   | rayon_scope 430 µs   |
+| 18 | 2.93 ms   | **428 µs**    | 6.86×   | rayon_scope 1.01 ms  |
+| 20 | 11.8 ms   | 6.25 ms       | 1.88×   | **rayon_scope 5.90 ms** |
 
 ### Crossover summary (aragorn vs M4)
 
@@ -402,10 +404,10 @@ on aragorn, leaving most of the parallel gain intact.
 
 ### Cap at 8 workers is leaving cores on the table at n ≥ 18
 
-At n ∈ {18, 20}, rayon's `par1_scope` (which uses the default rayon
+At n ∈ {18, 20}, rayon's `rayon_scope` (which uses the default rayon
 pool = 16 threads = all 32 logical cores) starts beating
-`par4_pinned` (fixed 8 workers). GF128 n=20: 12.4 ms (par1_scope) vs
-16.2 ms (par4_pinned), -23%. Fp128 n=20: 5.9 ms vs 6.25 ms, -5.6%.
+`pinned` (fixed 8 workers). GF128 n=20: 12.4 ms (rayon_scope) vs
+16.2 ms (pinned), -23%. Fp128 n=20: 5.9 ms vs 6.25 ms, -5.6%.
 
 Two options for follow-up (tracked under Phase B in the plan doc):
 
@@ -445,7 +447,7 @@ benchmarks and servers:
    stay in the spin path with zero futex overhead.
 4. **Bench fairness**: auto-park eliminates the pool-contamination
    artifact where rayon benchmarks looked 10-30× slower when run
-   serially in the same Criterion process after `par4_pinned` had
+   serially in the same Criterion process after `pinned` had
    warmed its pool.
 
 Numbers below are from the first fair Criterion sweep with all four
@@ -453,7 +455,7 @@ variants in the same process, pool default = 32, `PINNED_POOL_DEBUG=0`:
 
 **GF128 (aragorn, Zen 5 × 32 logical)**
 
-| n  | seq      | par1_scope | par1_pariter | par3_persist | **par4_pinned** | par4 vs best rayon |
+| n  | seq      | rayon_scope | rayon_iter | persistent | **pinned** | pinned vs best rayon |
 |----|----------|------------|--------------|--------------|-----------------|--------------------|
 | 10 | 94.8 µs  | 252 µs     | 230 µs       | 144 µs       | **49.3 µs**     | 2.9× faster        |
 | 12 | 378 µs   | 331 µs     | 307 µs       | 223 µs       | **102 µs**      | 3.0× faster        |
@@ -464,16 +466,16 @@ variants in the same process, pool default = 32, `PINNED_POOL_DEBUG=0`:
 
 **Fp128 (aragorn)**
 
-| n  | seq      | par1_scope | par1_pariter | par3_persist | **par4_pinned** | par4 vs best rayon |
+| n  | seq      | rayon_scope | rayon_iter | persistent | **pinned** | pinned vs best rayon |
 |----|----------|------------|--------------|--------------|-----------------|--------------------|
-| 10 | 11.3 µs  | 154 µs     | 230 µs       | 27.7 µs      | **6.86 µs**     | 4.0× faster (vs par3) |
-| 12 | 44.7 µs  | 200 µs     | 298 µs       | 40.8 µs      | **10.7 µs**     | 3.8× faster (vs par3) |
-| 14 | 179 µs   | 278 µs     | 379 µs       | 263 µs       | **55.8 µs**     | 4.7× faster (vs par3) |
-| 16 | 719 µs   | 454 µs     | 636 µs       | 232 µs       | **151 µs**      | 1.5× faster (vs par3) |
-| 18 | 2.88 ms  | 1.02 ms    | 1.37 ms      | 741 µs       | **519 µs**      | 1.4× faster (vs par3) |
-| 20 | 11.6 ms  | 5.78 ms    | 6.88 ms      | 5.32 ms      | **5.27 ms**     | 1.01× faster (vs par3) |
+| 10 | 11.3 µs  | 154 µs     | 230 µs       | 27.7 µs      | **6.86 µs**     | 4.0× faster (vs persistent) |
+| 12 | 44.7 µs  | 200 µs     | 298 µs       | 40.8 µs      | **10.7 µs**     | 3.8× faster (vs persistent) |
+| 14 | 179 µs   | 278 µs     | 379 µs       | 263 µs       | **55.8 µs**     | 4.7× faster (vs persistent) |
+| 16 | 719 µs   | 454 µs     | 636 µs       | 232 µs       | **151 µs**      | 1.5× faster (vs persistent) |
+| 18 | 2.88 ms  | 1.02 ms    | 1.37 ms      | 741 µs       | **519 µs**      | 1.4× faster (vs persistent) |
+| 20 | 11.6 ms  | 5.78 ms    | 6.88 ms      | 5.32 ms      | **5.27 ms**     | 1.01× faster (vs persistent) |
 
-**`par4_pinned` wins at every `(field, n)` pair**, with the gap
+**`pinned` wins at every `(field, n)` pair**, with the gap
 widening at small n (where the dispatch floor dominates) and
 narrowing at n=20 (where we are bandwidth-bound and any sane
 parallelizer converges to the same number). This is the "always beat
@@ -542,7 +544,7 @@ ILP-bound rate.
 Same Criterion harness as the Phase B table above, just with the new
 `.cargo/config.toml`:
 
-| n  | seq      | par1_scope | par1_pariter | par3_persist | **par4_pinned** | par4 vs best rayon |
+| n  | seq      | rayon_scope | rayon_iter | persistent | **pinned** | pinned vs best rayon |
 |----|----------|------------|--------------|--------------|-----------------|--------------------|
 | 10 | 10.86 µs | 234 µs     | 243 µs       | 27.5 µs      | **6.42 µs**     | 4.3× faster        |
 | 12 | 43.4 µs  | 320 µs     | 302 µs       | 46.6 µs      | **9.80 µs**     | 4.7× faster        |
@@ -553,14 +555,14 @@ Same Criterion harness as the Phase B table above, just with the new
 
 Per-variant speedup vs the pre-flag Phase B numbers:
 
-| n  | seq    | par4_pinned | rayon (best) |
+| n  | seq    | pinned | rayon (best) |
 |----|--------|-------------|--------------|
-| 10 | 8.7×   | 7.7×        | 1.6× (par3)  |
-| 12 | 8.7×   | 10.4×       | 4.8× (par3)  |
-| 14 | 8.7×   | 2.8×        | 0.7× (par3, regression noise) |
-| 16 | 8.7×   | 3.7×        | 2.9× (par3)  |
-| 18 | 8.7×   | 2.0×        | 2.3× (par3)  |
-| 20 | 8.7×   | 1.9×        | 2.2× (par3)  |
+| 10 | 8.7×   | 7.7×        | 1.6× (persistent)  |
+| 12 | 8.7×   | 10.4×       | 4.8× (persistent)  |
+| 14 | 8.7×   | 2.8×        | 0.7× (persistent, regression noise) |
+| 16 | 8.7×   | 3.7×        | 2.9× (persistent)  |
+| 18 | 8.7×   | 2.0×        | 2.3× (persistent)  |
+| 20 | 8.7×   | 1.9×        | 2.2× (persistent)  |
 
 Sequential GF128 sumcheck gets a clean ~8.7× win at every n,
 matching the per-mul speedup almost exactly (the inner loop is
@@ -569,10 +571,10 @@ ranges from 1.9× at large n (memory-bandwidth bound, the SIMD mul
 no longer dominates) to 10× at small n (compute-bound, where the
 new mul throughput shines through).
 
-`par4_pinned` is still the fastest variant at every `(n)` post-flag,
+`pinned` is still the fastest variant at every `(n)` post-flag,
 so the "always beat rayon at every scale" property is preserved.
-The crossover advantage *widens* at small n: `par4_pinned/12` now
-beats the best rayon variant by 4.7× (was 3.0×), and `par4_pinned/14`
+The crossover advantage *widens* at small n: `pinned/12` now
+beats the best rayon variant by 4.7× (was 3.0×), and `pinned/14`
 by 6.8× (was 1.7×).
 
 Fp128 is unchanged by the flag (it routes through `hachi-pcs`,
@@ -596,9 +598,9 @@ That's a separate project; tracked under "future optimizations" in
 
 ## Detailed findings
 
-### 1. Approach 4 (pinned pool + doorbell) is the overall winner.
+### 1. `pinned` (pinned pool + doorbell) is the overall winner.
 
-For **every** `(field, n)` pair with `n ≥ 12`, `par4_pinned` is the
+For **every** `(field, n)` pair with `n ≥ 12`, `pinned` is the
 fastest variant, often by a factor of 2-10× over the next-best parallel
 approach. The jump comes from three design choices that together
 attack the dispatch floor from a different direction than approaches
@@ -610,7 +612,7 @@ attack the dispatch floor from a different direction than approaches
    per-round `scope.join`.
 2. **Pinned on P-cores via `QOS_CLASS_USER_INTERACTIVE`.** On macOS,
    heavy spinning without a QoS hint causes the scheduler to demote
-   threads to E-cores (the exact failure mode we hit with Approach 3).
+   threads to E-cores (the exact failure mode we hit with `persistent`).
    Tagging the pool workers as user-interactive tells the scheduler
    "these threads are latency-critical", and the spinners stay on
    P-cores indefinitely. This lets the pool's doorbell loop use
@@ -635,7 +637,7 @@ round-trip latency of two `AtomicUsize` ops (~100-200 ns per round).
 
 ### 2. The crossover lands at `n = 12`, not at the hoped-for `n = 8-10`.
 
-The handoff note predicted Approach 4 would "drop the crossover to maybe
+The handoff note predicted `pinned` would "drop the crossover to maybe
 `n = 14-16`, not 8". In practice:
 
 - GF128: n=10 loses by 10% (4.23 vs 3.85 µs); n=12 wins by 25%; n=18
@@ -652,28 +654,28 @@ atomic-counter wait per worker, and at ~100 ns per atomic round-trip
 the barrier cost is larger than the honest parallel work that
 remains at `n ≤ 10`.
 
-### 3. Approach 3 (older persistent pool) is superseded.
+### 3. `persistent` (older persistent pool) is superseded.
 
-`par3_persistent` was the best variant at `n = 20` in the original
-sweep (1.6-1.8 ms for GF128/Fp128), but Approach 4 beats it at every
-`n` by 1.5-10×: GF128 n=20 is 993 µs for `par4_pinned` vs 3.49 ms for
-`par3_persistent` (3.5× improvement). The two key differences:
+`persistent` was the best variant at `n = 20` in the original
+sweep (1.6-1.8 ms for GF128/Fp128), but `pinned` beats it at every
+`n` by 1.5-10×: GF128 n=20 is 993 µs for `pinned` vs 3.49 ms for
+`persistent` (3.5× improvement). The two key differences:
 
-- `par3_persistent` spawns its pool inside a `rayon::scope` per call
+- `persistent` spawns its pool inside a `rayon::scope` per call
   (~24 µs scope floor per call, regardless of how persistent the
   internal workers are).
-- `par3_persistent` uses spin-then-yield because its workers are not
-  QoS-tagged; Approach 4's `USER_INTERACTIVE` tag lets it pure-spin
+- `persistent` uses spin-then-yield because its workers are not
+  QoS-tagged; `pinned`'s `USER_INTERACTIVE` tag lets it pure-spin
   without E-core demotion.
 
-We keep `par3_persistent` in the benchmark for historical comparison
+We keep `persistent` in the benchmark for historical comparison
 but it should no longer be used in production.
 
 ### 4. Chili's low-latency fork/join helps at `n ≈ 10-14`, but not enough to win.
 
 Chili's `scope.join` is ~**140× cheaper** than rayon's `scope` dispatch
 (164 ns vs 23 µs). At `n = 10-12` chili stays within 2-4× of sequential
-while per-round rayon variants are 10-50× off. But Approach 4 is still
+while per-round rayon variants are 10-50× off. But `pinned` is still
 faster than the best chili base-case at every `n ≥ 12`, and chili
 never beats sequential at `n ≤ 14` for either field.
 
@@ -683,7 +685,7 @@ The chili base-case sweep shows a clear sweet spot:
 - **n=16-20**: smaller `base` (128-512) wins. Parallelism benefits start to
   outweigh dispatch, and finer split improves load balance.
 
-### 5. `par1_scope` beats `par1_pariter` across the board.
+### 5. `rayon_scope` beats `rayon_iter` across the board.
 
 For every (field, n) point, manual `rayon::scope` + explicit chunking is
 faster than `par_iter + par_chunks_mut`. The gap is largest at small n
@@ -695,11 +697,11 @@ n=18 due to the 24 µs scope dispatch floor.
 
 ### 6. Fp128 and GF128 now cross over at the same `n`.
 
-With Approach 4, both fields cross over at `n = 12`. In the old sweep
+With `pinned`, both fields cross over at `n = 12`. In the old sweep
 Fp128 crossed over a doubling earlier than GF128 (`n = 18` vs `n = 20`)
 because the per-element Fp128 work is ~5× heavier (Solinas reduction vs
 CLMUL + GF(2^128) reduction), and that made the dispatch-heavy parallel
-variants look relatively better. Now that Approach 4's dispatch floor
+variants look relatively better. Now that `pinned`'s dispatch floor
 is low enough to be invisible at `n = 12`, the crossover is determined
 by pair count, not per-pair work, and both fields hit it at the same
 `n`. The Fp128 **speedups** are still larger (6.6× vs 3.9× at n=20)
@@ -742,16 +744,16 @@ if the application has more structure than "one sumcheck call":
 
 For the delayed sumcheck kernel on Apple Silicon:
 
-1. **Use `par4_pinned` as the default for `n ≥ 12`.** It is the
+1. **Use `pinned` as the default for `n ≥ 12`.** It is the
    fastest variant at every `(field, n)` we measured for `n ≥ 12`, with
    speedups of 1.25-5.3× (GF128) and 2.45-6.6× (Fp128) over sequential.
    Crossover is `n = 12` for both fields.
-2. **Use sequential at `n ≤ 10`.** Approach 4 loses by ~10% at `n = 10`
+2. **Use sequential at `n ≤ 10`.** `pinned` loses by ~10% at `n = 10`
    (GF128: 4.23 vs 3.85 µs; Fp128: 13.3 vs 12.0 µs): the top-level
    broadcast is cheap, but the per-round atomic barriers across workers
    accumulate to 1-2 µs over ~6 parallel rounds, which is larger than
    the parallel speedup recovers at these sizes. A simple size check
-   (`if initial_pairs < 1024 { delayed(...) } else { delayed_par4_pinned(...) }`)
+   (`if initial_pairs < 1024 { delayed(...) } else { delayed_pinned(...) }`)
    is the production-safe dispatch.
 3. **Override `SUMCHECK_PINNED_WORKERS` only if you know the workload.**
    Default is `min(available_parallelism(), 8)`. For pure `n = 10`
@@ -759,9 +761,9 @@ For the delayed sumcheck kernel on Apple Silicon:
    3.66 µs (0.95× seq), which flips the sign on the n=10 crossover;
    but that hurts `n ≥ 14` throughput noticeably. Leave the default
    alone unless small-n is the dominant use case.
-4. **Retire `par3_persistent` and the chili base-case sweep.** Approach
+4. **Retire `persistent` and the chili base-case sweep.** Approach
    4 dominates both. The chili variants are retained only because
-   they're cheap to keep building; `par3_persistent` is kept for
+   they're cheap to keep building; `persistent` is kept for
    historical comparison and should not be called from production.
 5. **If the goal really is `n ≈ 8` crossover, change the problem shape,
    not the scheduler.** Intra-thread SIMD pipelining or batching many
@@ -784,9 +786,9 @@ cargo bench --bench sumcheck_parallel --features parallel_chili -- dispatch_floo
 
 # override the pinned pool size (default: min(available_parallelism(), 8))
 SUMCHECK_PINNED_WORKERS=4 cargo bench --bench sumcheck_parallel \
-  --features parallel_chili -- par4_pinned
+  --features parallel_chili -- pinned
 ```
 
 Raw Criterion output:
-- `target/parallelism-results/bench-full.log` (Approaches 1-3, original sweep)
-- `target/parallelism-results/bench-par4-final.log` (Approach 4 final sweep, all 4 approaches)
+- `target/parallelism-results/bench-full.log` (`rayon_scope`, `rayon_iter`, `chili`, `persistent` pre-production variants, original sweep)
+- `target/parallelism-results/bench-pinned-final.log` (`pinned` final sweep, all 4 approaches)

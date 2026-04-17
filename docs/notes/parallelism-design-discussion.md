@@ -2,13 +2,13 @@
 
 > Companion to [`PARALLELISM.md`](../../PARALLELISM.md). Records the
 > follow-up conversation about (a) the theoretical optimality of the
-> Approach 4 design, (b) what it would take to ship it across SNARK
+> `pinned` design, (b) what it would take to ship it across SNARK
 > codebases, and (c) the parallel-prefix / sequential-tail decomposition.
 >
 > Source: chat session, 2026-04-16. Pre-implementation handoff is at
 > [`../handoffs/parallelism-2026-04.md`](../handoffs/parallelism-2026-04.md).
 
-## 1. In what sense is Approach 4 "optimal"?
+## 1. In what sense is `pinned` "optimal"?
 
 It is a strong **local optimum** for one sumcheck call on M4-class
 hardware at small `n`. It is **not** provably optimal in any
@@ -24,7 +24,7 @@ barrier cost at `k` workers. Brent's bound:
 T_p \geq \frac{W}{p} + S = \frac{F \cdot 2^n}{p} + n \cdot (F + B(k))
 \]
 
-Approach 4 gets close:
+`pinned` gets close:
 
 - **Work term tight.** Even contiguous chunking, `W/p` is sharp.
 - **Span term tight to ~2x.** Two `AtomicUsize` waits per round is
@@ -133,7 +133,7 @@ were:
   Linux needs `sched_setaffinity` to a P-core mask plus optional
   `SCHED_FIFO`; Windows uses `SetThreadAffinityMask` +
   `THREAD_PRIORITY_TIME_CRITICAL`. Without P-core pinning, fall back
-  to spin-then-yield (Approach 3's mechanism).
+  to spin-then-yield (`persistent`'s mechanism).
 - **Pool lifecycle**: current `OnceLock` global is fine for CLI
   provers but bad for long-running services (workers spin forever).
   Expose `PinnedPool::new(config) -> Arc<PinnedPool>` for explicit
@@ -156,16 +156,16 @@ were:
 
 ## 3. Parallel-prefix / sequential-tail decomposition
 
-**Yes, we already do this.** The mechanism is `par3_scope_rounds` at
+**Yes, we already do this.** The mechanism is `persistent_scope_rounds` at
 [`src/sumcheck/parallel.rs:103-117`](../../src/sumcheck/parallel.rs).
-With `PAR3_MIN_PAIRS_PER_WORKER = 8`:
+With `PERSISTENT_MIN_PAIRS_PER_WORKER = 8`:
 
 ```text
-fn par3_scope_rounds(initial_pairs, n_workers, n_rounds) -> usize {
+fn persistent_scope_rounds(initial_pairs, n_workers, n_rounds) -> usize {
     if n_workers <= 1 || n_rounds == 0 { return 0; }
     let initial_per_worker = initial_pairs / n_workers;
-    if initial_per_worker < PAR3_MIN_PAIRS_PER_WORKER { return 0; }
-    let ratio = initial_per_worker / PAR3_MIN_PAIRS_PER_WORKER;
+    if initial_per_worker < PERSISTENT_MIN_PAIRS_PER_WORKER { return 0; }
+    let ratio = initial_per_worker / PERSISTENT_MIN_PAIRS_PER_WORKER;
     let max_scope_rounds = ratio.ilog2() as usize + 1;
     max_scope_rounds.min(n_rounds)
 }
@@ -202,7 +202,7 @@ them would cost more in barrier overhead than they save.
 
 Mostly good, with three known issues:
 
-1. **Single threshold across fields.** `PAR3_MIN_PAIRS_PER_WORKER = 8`
+1. **Single threshold across fields.** `PERSISTENT_MIN_PAIRS_PER_WORKER = 8`
    is shared between GF128 and Fp128. Fp128 per-pair work is ~5x
    heavier so it can justify smaller chunks. Production fix: per-field
    trait constant `DelayedSumcheckField::MIN_PAIRS_PER_WORKER`.

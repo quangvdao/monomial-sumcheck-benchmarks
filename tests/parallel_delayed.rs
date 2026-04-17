@@ -27,37 +27,43 @@ fn check_gf128(n: usize) {
 
     let mut f_scope = f.clone();
     let mut g_scope = g.clone();
-    sumcheck_deg2_delayed_gf128_par1_scope(&mut f_scope, &mut g_scope, &challenges);
+    sumcheck_deg2_delayed_gf128_rayon_scope(&mut f_scope, &mut g_scope, &challenges);
 
     let mut f_pi = f.clone();
     let mut g_pi = g.clone();
-    sumcheck_deg2_delayed_gf128_par1_pariter(&mut f_pi, &mut g_pi, &challenges);
+    sumcheck_deg2_delayed_gf128_rayon_iter(&mut f_pi, &mut g_pi, &challenges);
 
     let mut f_p3 = f.clone();
     let mut g_p3 = g.clone();
-    sumcheck_deg2_delayed_gf128_par3_persistent(&mut f_p3, &mut g_p3, &challenges);
+    sumcheck_deg2_delayed_gf128_persistent(&mut f_p3, &mut g_p3, &challenges);
 
     let mut f_p4 = f.clone();
     let mut g_p4 = g.clone();
-    sumcheck_deg2_delayed_gf128_par4_pinned(&mut f_p4, &mut g_p4, &challenges);
+    sumcheck_deg2_delayed_gf128_pinned(&mut f_p4, &mut g_p4, &challenges, false);
 
-    assert_eq!(f_scope, f_seq, "GF128 par1_scope f mismatch at n={n}");
-    assert_eq!(g_scope, g_seq, "GF128 par1_scope g mismatch at n={n}");
-    assert_eq!(f_pi, f_seq, "GF128 par1_pariter f mismatch at n={n}");
-    assert_eq!(g_pi, g_seq, "GF128 par1_pariter g mismatch at n={n}");
-    assert_eq!(f_p3, f_seq, "GF128 par3_persistent f mismatch at n={n}");
-    assert_eq!(g_p3, g_seq, "GF128 par3_persistent g mismatch at n={n}");
-    assert_eq!(f_p4, f_seq, "GF128 par4_pinned f mismatch at n={n}");
-    assert_eq!(g_p4, g_seq, "GF128 par4_pinned g mismatch at n={n}");
+    let mut f_p4_fused = f.clone();
+    let mut g_p4_fused = g.clone();
+    sumcheck_deg2_delayed_gf128_pinned(&mut f_p4_fused, &mut g_p4_fused, &challenges, true);
+
+    assert_eq!(f_scope, f_seq, "GF128 rayon_scope f mismatch at n={n}");
+    assert_eq!(g_scope, g_seq, "GF128 rayon_scope g mismatch at n={n}");
+    assert_eq!(f_pi, f_seq, "GF128 rayon_iter f mismatch at n={n}");
+    assert_eq!(g_pi, g_seq, "GF128 rayon_iter g mismatch at n={n}");
+    assert_eq!(f_p3, f_seq, "GF128 persistent f mismatch at n={n}");
+    assert_eq!(g_p3, g_seq, "GF128 persistent g mismatch at n={n}");
+    assert_eq!(f_p4, f_seq, "GF128 pinned (unfused) f mismatch at n={n}");
+    assert_eq!(g_p4, g_seq, "GF128 pinned (unfused) g mismatch at n={n}");
+    assert_eq!(f_p4_fused, f_seq, "GF128 pinned (fused) f mismatch at n={n}");
+    assert_eq!(g_p4_fused, g_seq, "GF128 pinned (fused) g mismatch at n={n}");
 
     #[cfg(feature = "parallel_chili")]
     {
         for base in [8, 32, 128, 512].iter() {
             let mut f_ch = f.clone();
             let mut g_ch = g.clone();
-            sumcheck_deg2_delayed_gf128_par2_chili(&mut f_ch, &mut g_ch, &challenges, *base);
-            assert_eq!(f_ch, f_seq, "GF128 par2_chili (base={base}) f mismatch at n={n}");
-            assert_eq!(g_ch, g_seq, "GF128 par2_chili (base={base}) g mismatch at n={n}");
+            sumcheck_deg2_delayed_gf128_chili(&mut f_ch, &mut g_ch, &challenges, *base);
+            assert_eq!(f_ch, f_seq, "GF128 chili (base={base}) f mismatch at n={n}");
+            assert_eq!(g_ch, g_seq, "GF128 chili (base={base}) g mismatch at n={n}");
         }
     }
 }
@@ -73,37 +79,43 @@ fn check_fp128(n: usize) {
 
     let mut f_scope = f.clone();
     let mut g_scope = g.clone();
-    sumcheck_deg2_delayed_fp128_par1_scope(&mut f_scope, &mut g_scope, &challenges);
+    sumcheck_deg2_delayed_fp128_rayon_scope(&mut f_scope, &mut g_scope, &challenges);
 
     let mut f_pi = f.clone();
     let mut g_pi = g.clone();
-    sumcheck_deg2_delayed_fp128_par1_pariter(&mut f_pi, &mut g_pi, &challenges);
+    sumcheck_deg2_delayed_fp128_rayon_iter(&mut f_pi, &mut g_pi, &challenges);
 
     let mut f_p3 = f.clone();
     let mut g_p3 = g.clone();
-    sumcheck_deg2_delayed_fp128_par3_persistent(&mut f_p3, &mut g_p3, &challenges);
+    sumcheck_deg2_delayed_fp128_persistent(&mut f_p3, &mut g_p3, &challenges);
 
     let mut f_p4 = f.clone();
     let mut g_p4 = g.clone();
-    sumcheck_deg2_delayed_fp128_par4_pinned(&mut f_p4, &mut g_p4, &challenges);
+    sumcheck_deg2_delayed_fp128_pinned(&mut f_p4, &mut g_p4, &challenges, false);
 
-    assert_eq!(f_scope, f_seq, "Fp128 par1_scope f mismatch at n={n}");
-    assert_eq!(g_scope, g_seq, "Fp128 par1_scope g mismatch at n={n}");
-    assert_eq!(f_pi, f_seq, "Fp128 par1_pariter f mismatch at n={n}");
-    assert_eq!(g_pi, g_seq, "Fp128 par1_pariter g mismatch at n={n}");
-    assert_eq!(f_p3, f_seq, "Fp128 par3_persistent f mismatch at n={n}");
-    assert_eq!(g_p3, g_seq, "Fp128 par3_persistent g mismatch at n={n}");
-    assert_eq!(f_p4, f_seq, "Fp128 par4_pinned f mismatch at n={n}");
-    assert_eq!(g_p4, g_seq, "Fp128 par4_pinned g mismatch at n={n}");
+    let mut f_p4_fused = f.clone();
+    let mut g_p4_fused = g.clone();
+    sumcheck_deg2_delayed_fp128_pinned(&mut f_p4_fused, &mut g_p4_fused, &challenges, true);
+
+    assert_eq!(f_scope, f_seq, "Fp128 rayon_scope f mismatch at n={n}");
+    assert_eq!(g_scope, g_seq, "Fp128 rayon_scope g mismatch at n={n}");
+    assert_eq!(f_pi, f_seq, "Fp128 rayon_iter f mismatch at n={n}");
+    assert_eq!(g_pi, g_seq, "Fp128 rayon_iter g mismatch at n={n}");
+    assert_eq!(f_p3, f_seq, "Fp128 persistent f mismatch at n={n}");
+    assert_eq!(g_p3, g_seq, "Fp128 persistent g mismatch at n={n}");
+    assert_eq!(f_p4, f_seq, "Fp128 pinned (unfused) f mismatch at n={n}");
+    assert_eq!(g_p4, g_seq, "Fp128 pinned (unfused) g mismatch at n={n}");
+    assert_eq!(f_p4_fused, f_seq, "Fp128 pinned (fused) f mismatch at n={n}");
+    assert_eq!(g_p4_fused, g_seq, "Fp128 pinned (fused) g mismatch at n={n}");
 
     #[cfg(feature = "parallel_chili")]
     {
         for base in [8, 32, 128, 512].iter() {
             let mut f_ch = f.clone();
             let mut g_ch = g.clone();
-            sumcheck_deg2_delayed_fp128_par2_chili(&mut f_ch, &mut g_ch, &challenges, *base);
-            assert_eq!(f_ch, f_seq, "Fp128 par2_chili (base={base}) f mismatch at n={n}");
-            assert_eq!(g_ch, g_seq, "Fp128 par2_chili (base={base}) g mismatch at n={n}");
+            sumcheck_deg2_delayed_fp128_chili(&mut f_ch, &mut g_ch, &challenges, *base);
+            assert_eq!(f_ch, f_seq, "Fp128 chili (base={base}) f mismatch at n={n}");
+            assert_eq!(g_ch, g_seq, "Fp128 chili (base={base}) g mismatch at n={n}");
         }
     }
 }

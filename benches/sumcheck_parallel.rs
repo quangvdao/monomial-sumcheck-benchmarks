@@ -1,22 +1,25 @@
 //! Parallelism shootout bench.
 //!
-//! Measures the delayed sumcheck kernel for GF128 and Fp128 across all three
-//! approaches in the same process, so Criterion produces a direct comparison
-//! table against the sequential baseline.
+//! Measures the delayed sumcheck kernel for GF128 and Fp128 across every
+//! parallelism variant in the same process, so Criterion produces a direct
+//! comparison table against the sequential baseline.
 //!
-//! Variants:
+//! Variants (see `PARALLELISM.md` for the full history):
 //!
-//! - `delayed`                 : sequential baseline (same function as
-//!                               `benches/sumcheck.rs`).
-//! - `delayed_par1_scope`      : manual chunked `rayon::scope` (Approach 1).
-//! - `delayed_par1_pariter`    : `par_iter` control to isolate manual-scope
-//!                               vs par_iter dispatch overhead.
-//! - `delayed_par2_chili_BASE` : chili recursive `scope.join` (Approach 2),
-//!                               swept across base-case thresholds.
-//!                               (only compiled with `--features parallel_chili`)
-//! - `delayed_par3_persistent` : persistent pool + atomic barrier (Approach 3).
-//! - `delayed_par4_pinned`     : globally-persistent pinned pool + doorbell
-//!                               (Approach 4).
+//! - `delayed`             : sequential baseline (same function as
+//!                           `benches/sumcheck.rs`).
+//! - `delayed_rayon_scope` : manual chunked `rayon::scope` (one scope per
+//!                           round, `n_workers` spawns).
+//! - `delayed_rayon_iter`  : `par_iter` control for `rayon_scope` to
+//!                           isolate manual-spawn vs `par_iter` dispatch
+//!                           overhead.
+//! - `delayed_chili_BASE`  : chili recursive `scope.join`, swept across
+//!                           base-case thresholds (only compiled with
+//!                           `--features parallel_chili`).
+//! - `delayed_persistent`  : one rayon scope for the whole call, persistent
+//!                           workers + atomic-barrier synchronization.
+//! - `delayed_pinned_{unfused,fused}` : production pinned-pool + doorbell,
+//!                           driven by `sumcheck_parallel::par_sumcheck`.
 //!
 //! Sizes sweep `n ∈ {10, 12, 14, 16, 18, 20}` so the per-round `half` covers
 //! both the "parallel obviously loses" and "parallel obviously wins" regimes.
@@ -99,7 +102,7 @@ fn bench_dispatch_floor(c: &mut Criterion) {
         });
     }
 
-    // Dispatch cost for Approach 4's globally-persistent pinned pool.
+    // Dispatch cost for the `pinned` variant's globally-persistent pool.
     // Warm up the pool first so the lazy `OnceLock` init doesn't taint
     // the first sample. Sweep across active-worker counts so we can see
     // how the barrier cost scales with contention.
@@ -124,12 +127,14 @@ fn bench_dispatch_floor(c: &mut Criterion) {
 }
 
 // Indices for the randomised run order per `n`.
-// Base variants (in order): 0 delayed, 1 par1_scope, 2 par1_pariter,
-// 3 par3_persistent, 4 par4_pinned. Chili bases (if enabled) follow.
+// Base variants (in order): 0 delayed, 1 rayon_scope, 2 rayon_iter,
+// 3 persistent, 4 pinned_unfused, 5 pinned_fused.
+// Chili bases (if enabled) follow.
+const N_BASE_VARIANTS: usize = 6;
 #[cfg(feature = "parallel_chili")]
-const N_GF128_VARIANTS: usize = 5 + CHILI_BASES.len();
+const N_GF128_VARIANTS: usize = N_BASE_VARIANTS + CHILI_BASES.len();
 #[cfg(not(feature = "parallel_chili"))]
-const N_GF128_VARIANTS: usize = 5;
+const N_GF128_VARIANTS: usize = N_BASE_VARIANTS;
 
 fn bench_gf128(c: &mut Criterion) {
     let mut group = c.benchmark_group("sumcheck_deg2/GF128");
@@ -157,13 +162,13 @@ fn bench_gf128(c: &mut Criterion) {
                 }
                 1 => {
                     group.bench_with_input(
-                        BenchmarkId::new("delayed_par1_scope", n),
+                        BenchmarkId::new("delayed_rayon_scope", n),
                         &n,
                         |b, _| {
                             b.iter_batched(
                                 || (f_orig.clone(), g_orig.clone()),
                                 |(mut f, mut g)| {
-                                    sumcheck_deg2_delayed_gf128_par1_scope(
+                                    sumcheck_deg2_delayed_gf128_rayon_scope(
                                         &mut f,
                                         &mut g,
                                         &challenges,
@@ -176,13 +181,13 @@ fn bench_gf128(c: &mut Criterion) {
                 }
                 2 => {
                     group.bench_with_input(
-                        BenchmarkId::new("delayed_par1_pariter", n),
+                        BenchmarkId::new("delayed_rayon_iter", n),
                         &n,
                         |b, _| {
                             b.iter_batched(
                                 || (f_orig.clone(), g_orig.clone()),
                                 |(mut f, mut g)| {
-                                    sumcheck_deg2_delayed_gf128_par1_pariter(
+                                    sumcheck_deg2_delayed_gf128_rayon_iter(
                                         &mut f,
                                         &mut g,
                                         &challenges,
@@ -195,13 +200,13 @@ fn bench_gf128(c: &mut Criterion) {
                 }
                 3 => {
                     group.bench_with_input(
-                        BenchmarkId::new("delayed_par3_persistent", n),
+                        BenchmarkId::new("delayed_persistent", n),
                         &n,
                         |b, _| {
                             b.iter_batched(
                                 || (f_orig.clone(), g_orig.clone()),
                                 |(mut f, mut g)| {
-                                    sumcheck_deg2_delayed_gf128_par3_persistent(
+                                    sumcheck_deg2_delayed_gf128_persistent(
                                         &mut f,
                                         &mut g,
                                         &challenges,
@@ -214,16 +219,37 @@ fn bench_gf128(c: &mut Criterion) {
                 }
                 4 => {
                     group.bench_with_input(
-                        BenchmarkId::new("delayed_par4_pinned", n),
+                        BenchmarkId::new("delayed_pinned_unfused", n),
                         &n,
                         |b, _| {
                             b.iter_batched(
                                 || (f_orig.clone(), g_orig.clone()),
                                 |(mut f, mut g)| {
-                                    sumcheck_deg2_delayed_gf128_par4_pinned(
+                                    sumcheck_deg2_delayed_gf128_pinned(
                                         &mut f,
                                         &mut g,
                                         &challenges,
+                                        false,
+                                    );
+                                },
+                                criterion::BatchSize::LargeInput,
+                            )
+                        },
+                    );
+                }
+                5 => {
+                    group.bench_with_input(
+                        BenchmarkId::new("delayed_pinned_fused", n),
+                        &n,
+                        |b, _| {
+                            b.iter_batched(
+                                || (f_orig.clone(), g_orig.clone()),
+                                |(mut f, mut g)| {
+                                    sumcheck_deg2_delayed_gf128_pinned(
+                                        &mut f,
+                                        &mut g,
+                                        &challenges,
+                                        true,
                                     );
                                 },
                                 criterion::BatchSize::LargeInput,
@@ -232,14 +258,14 @@ fn bench_gf128(c: &mut Criterion) {
                     );
                 }
                 #[cfg(feature = "parallel_chili")]
-                k if (5..5 + CHILI_BASES.len()).contains(&k) => {
-                    let base = CHILI_BASES[k - 5];
-                    let label = format!("delayed_par2_chili_b{base}");
+                k if (N_BASE_VARIANTS..N_BASE_VARIANTS + CHILI_BASES.len()).contains(&k) => {
+                    let base = CHILI_BASES[k - N_BASE_VARIANTS];
+                    let label = format!("delayed_chili_b{base}");
                     group.bench_with_input(BenchmarkId::new(label, n), &n, |b, _| {
                         b.iter_batched(
                             || (f_orig.clone(), g_orig.clone()),
                             |(mut f, mut g)| {
-                                sumcheck_deg2_delayed_gf128_par2_chili(
+                                sumcheck_deg2_delayed_gf128_chili(
                                     &mut f,
                                     &mut g,
                                     &challenges,
@@ -283,13 +309,13 @@ fn bench_fp128(c: &mut Criterion) {
                 }
                 1 => {
                     group.bench_with_input(
-                        BenchmarkId::new("delayed_par1_scope", n),
+                        BenchmarkId::new("delayed_rayon_scope", n),
                         &n,
                         |b, _| {
                             b.iter_batched(
                                 || (f_orig.clone(), g_orig.clone()),
                                 |(mut f, mut g)| {
-                                    sumcheck_deg2_delayed_fp128_par1_scope(
+                                    sumcheck_deg2_delayed_fp128_rayon_scope(
                                         &mut f,
                                         &mut g,
                                         &challenges,
@@ -302,13 +328,13 @@ fn bench_fp128(c: &mut Criterion) {
                 }
                 2 => {
                     group.bench_with_input(
-                        BenchmarkId::new("delayed_par1_pariter", n),
+                        BenchmarkId::new("delayed_rayon_iter", n),
                         &n,
                         |b, _| {
                             b.iter_batched(
                                 || (f_orig.clone(), g_orig.clone()),
                                 |(mut f, mut g)| {
-                                    sumcheck_deg2_delayed_fp128_par1_pariter(
+                                    sumcheck_deg2_delayed_fp128_rayon_iter(
                                         &mut f,
                                         &mut g,
                                         &challenges,
@@ -321,13 +347,13 @@ fn bench_fp128(c: &mut Criterion) {
                 }
                 3 => {
                     group.bench_with_input(
-                        BenchmarkId::new("delayed_par3_persistent", n),
+                        BenchmarkId::new("delayed_persistent", n),
                         &n,
                         |b, _| {
                             b.iter_batched(
                                 || (f_orig.clone(), g_orig.clone()),
                                 |(mut f, mut g)| {
-                                    sumcheck_deg2_delayed_fp128_par3_persistent(
+                                    sumcheck_deg2_delayed_fp128_persistent(
                                         &mut f,
                                         &mut g,
                                         &challenges,
@@ -340,16 +366,37 @@ fn bench_fp128(c: &mut Criterion) {
                 }
                 4 => {
                     group.bench_with_input(
-                        BenchmarkId::new("delayed_par4_pinned", n),
+                        BenchmarkId::new("delayed_pinned_unfused", n),
                         &n,
                         |b, _| {
                             b.iter_batched(
                                 || (f_orig.clone(), g_orig.clone()),
                                 |(mut f, mut g)| {
-                                    sumcheck_deg2_delayed_fp128_par4_pinned(
+                                    sumcheck_deg2_delayed_fp128_pinned(
                                         &mut f,
                                         &mut g,
                                         &challenges,
+                                        false,
+                                    );
+                                },
+                                criterion::BatchSize::LargeInput,
+                            )
+                        },
+                    );
+                }
+                5 => {
+                    group.bench_with_input(
+                        BenchmarkId::new("delayed_pinned_fused", n),
+                        &n,
+                        |b, _| {
+                            b.iter_batched(
+                                || (f_orig.clone(), g_orig.clone()),
+                                |(mut f, mut g)| {
+                                    sumcheck_deg2_delayed_fp128_pinned(
+                                        &mut f,
+                                        &mut g,
+                                        &challenges,
+                                        true,
                                     );
                                 },
                                 criterion::BatchSize::LargeInput,
@@ -358,14 +405,14 @@ fn bench_fp128(c: &mut Criterion) {
                     );
                 }
                 #[cfg(feature = "parallel_chili")]
-                k if (5..5 + CHILI_BASES.len()).contains(&k) => {
-                    let base = CHILI_BASES[k - 5];
-                    let label = format!("delayed_par2_chili_b{base}");
+                k if (N_BASE_VARIANTS..N_BASE_VARIANTS + CHILI_BASES.len()).contains(&k) => {
+                    let base = CHILI_BASES[k - N_BASE_VARIANTS];
+                    let label = format!("delayed_chili_b{base}");
                     group.bench_with_input(BenchmarkId::new(label, n), &n, |b, _| {
                         b.iter_batched(
                             || (f_orig.clone(), g_orig.clone()),
                             |(mut f, mut g)| {
-                                sumcheck_deg2_delayed_fp128_par2_chili(
+                                sumcheck_deg2_delayed_fp128_chili(
                                     &mut f,
                                     &mut g,
                                     &challenges,

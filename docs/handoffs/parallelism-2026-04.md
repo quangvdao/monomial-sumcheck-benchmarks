@@ -2,7 +2,7 @@
 
 > **Status: superseded by [`PARALLELISM.md`](../../PARALLELISM.md) (2026-04).**
 > This doc is the original scoping note from before implementation.
-> It lists three approaches; the actual work tested four (Approach 4,
+> It lists three approaches; the actual work tested four (`pinned`,
 > the pinned-pool + doorbell design, was added during implementation
 > and is the production recommendation). Predictions in this doc about
 > chili performance and the `n = 8-10` crossover were not borne out.
@@ -27,7 +27,7 @@ The open question is: can we push the crossover down to `log_half ≈ 8-10` with
 ## Why this repo is the right sandbox
 
 - **Zero external prover plumbing.** Kernels are plain `fn(&mut Vec<F>, &mut Vec<F>, &[F], ...)` at `src/sumcheck/generic.rs:6-189` (and field-specific variants). No `SumcheckProver` trait, no transcript, no `rayon::ThreadPoolBuilder` lurking anywhere.
-- **Pre-generated challenges + `black_box` verifier.** The round message computation uses `black_box((h0, h1, h_inf))` (e.g. `src/sumcheck/generic.rs:31`). There is no Fiat-Shamir between rounds, so the "cross-round sync" in Approach 3 below is purely synthetic: workers can do all rounds back-to-back with just a barrier for each `black_box`. That's *exactly* what we want to benchmark — the per-round barrier cost in isolation.
+- **Pre-generated challenges + `black_box` verifier.** The round message computation uses `black_box((h0, h1, h_inf))` (e.g. `src/sumcheck/generic.rs:31`). There is no Fiat-Shamir between rounds, so the "cross-round sync" in `persistent` below is purely synthetic: workers can do all rounds back-to-back with just a barrier for each `black_box`. That's *exactly* what we want to benchmark — the per-round barrier cost in isolation.
 - **Many field types, one harness.** BN254 (256-bit prime), Fp128 (128-bit prime), BB4/BB5 (BabyBear deg-4/5 extensions), KB5 (KoalaBear deg-5), GF128 (binary-char 128-bit GHASH). Different per-element costs → different sequential-to-parallel ratios → different crossover points.
 - **Sizes sweep the interesting range.** `ns = [16, 20, 24]` for the large fields; `ns = [16, 20]` for BB/KB and Fp128/GF128. At n = 16, first-round `half = 2^15 = 32768` packed elements, last-round `half = 1`. At n = 24 BN254, first-round `half = 2^23`. This spans both "parallel is obviously winning" and "parallel is obviously losing" regimes in the *same* prover run.
 - **Single-threaded baseline is already tuned and published.** The paper numbers (M4 Max, single-threaded, thin LTO) are the oracle against which parallel must win. `src/sumcheck/*` contains codegen-sensitive tuning (see `README.md:44-45`) — **do not touch those kernels**. Only add new parallel wrappers that call the existing sequential code per chunk.
@@ -113,7 +113,7 @@ Known chili caveats (from chili README / rayon issue #1235): no scoped/spawn API
 
 Spend one pool dispatch for the entire `sumcheck_deg2_delayed_*` call. Workers own contiguous slices across all rounds; main thread coordinates the (synthetic) `black_box` handoff per round via atomic counters.
 
-This is the structural win: you pay N round dispatches in Approaches 1 and 2, but 1 dispatch total in Approach 3. For sumcheck specifically, N ≈ 16-24. If Rayon dispatch is the floor, Approach 3 should crush 1 at small sizes.
+This is the structural win: you pay N round dispatches in Approaches 1 and 2, but 1 dispatch total in `persistent`. For sumcheck specifically, N ≈ 16-24. If Rayon dispatch is the floor, `persistent` should crush 1 at small sizes.
 
 Shape (pseudocode, concrete version lives in the parent-context conversation):
 
@@ -157,34 +157,34 @@ Shrinking-chunk wrinkle: once `half / n_workers < some_threshold`, the per-worke
    ```
    Record the median from Criterion's output. Do the same for `Fp128/delayed/20` and `BN254/delayed/20`.
 
-### Phase 1: Approach 1 — manual chunked `rayon::scope` (half day)
+### Phase 1: `rayon_scope` (manual chunked `rayon::scope` (half day)
 
 1. Add `rayon = "1"` to `[dev-dependencies]` in `Cargo.toml`.
 2. Create a **new** file `benches/sumcheck_parallel.rs` (register it in `Cargo.toml` as `[[bench]]` with `harness = false`). Mirror the structure of `benches/sumcheck.rs` but:
    - Call parallel variants of the kernels.
-   - Add a suffix `_par1` to the Criterion benchmark IDs to avoid clashing with existing IDs.
+   - Add a suffix `_rayon_scope` to the Criterion benchmark IDs to avoid clashing with existing IDs.
    - Include the same sizes and fields: start with GF128 and Fp128 for speed, add BN254 if time permits.
 3. Add a sibling module `src/sumcheck/parallel.rs` (declared from `src/sumcheck/mod.rs`). Put the parallel wrappers there so existing kernels stay untouched. One wrapper per sequential kernel we want to test.
-4. Run `cargo bench --bench sumcheck_parallel -- 'GF128/delayed_par1/20'` and compare against the Phase-0 median.
+4. Run `cargo bench --bench sumcheck_parallel -- 'GF128/delayed_rayon_scope/20'` and compare against the Phase-0 median.
 5. Also compare against a `par_iter` version (the "control") by implementing a `par_iter_control` variant that uses the standard `into_par_iter().fold().reduce()` pattern from rayon. This isolates the "manual scope vs par_iter" overhead.
 
 **Success criterion for Phase 1:** parallel beats sequential on at least one (field, size) pair at n = 20, and you know empirically how much of the 19 µs Rayon floor went away. Report result with a short note.
 
-### Phase 2: Approach 2 — chili (half day)
+### Phase 2: `chili` (half day)
 
 1. Add `chili = "0.2"` to `[dev-dependencies]`.
 2. Add chili variants to `src/sumcheck/parallel.rs`. Use recursive `scope.join` with a base case of ~64-256 elements. Parameterize `base` so it can be swept.
-3. Add `_par2_chili` variants to `benches/sumcheck_parallel.rs`.
+3. Add `_chili` variants to `benches/sumcheck_parallel.rs`.
 4. Sweep `base` in `[32, 64, 128, 256, 512]` for one field at n = 20 to find the sweet spot, then use that for all other runs.
 5. Compare against Phase 1.
 
 **Success criterion for Phase 2:** crossover point (smallest n at which parallel beats sequential) drops meaningfully vs Phase 1. If chili doesn't help, that tells us the dominant cost *isn't* worker wake-up and we should reconsider Phase 3.
 
-### Phase 3: Approach 3 — persistent-pool + atomic barrier (1-2 days)
+### Phase 3: `persistent` (rayon scope + persistent workers + atomic barrier (1-2 days)
 
 Only do this if Phase 2 shows chili clearly helps. The structural refactor is only worth it if parking is really the floor.
 
-1. Add a `par3_persistent` variant per field that wraps *the entire outer loop* (all `n_rounds` rounds) inside one `rayon::scope`.
+1. Add a `persistent` variant per field that wraps *the entire outer loop* (all `n_rounds` rounds) inside one `rayon::scope`.
 2. Design the shared state carefully (see shape above). Use `crossbeam_utils::CachePadded<AtomicUsize>` for the barriers to avoid false sharing.
 3. Think carefully about the shrinking-chunk tail: at some round, the per-worker chunk is too small to justify the barrier, and you should fall back to sequential for the tail.
 4. Benchmark against Phases 1 and 2.
@@ -259,7 +259,7 @@ None in this repo. Scoping was read-only inspection of:
 1. Run Phase 0 sanity + baseline for GF128/Fp128/BN254 at n = 20.
 2. Implement Phase 1 (manual chunked `rayon::scope`). Add dep, new bench file, new kernel module, one GF128 variant. Bench; compare.
 3. If Phase 1 works for at least one (field, n), extend to Fp128 and BN254.
-4. Phase 2: chili.
+4. Phase 2: `chili`.
 5. Decide based on (1-4) whether Phase 3 is worth it. If yes, implement. If no, close out with a `PARALLELISM.md` that documents "Rayon-dispatch cost is not the bottleneck on this workload" and what the actual bottleneck is.
 6. Write `PARALLELISM.md` with the table.
 

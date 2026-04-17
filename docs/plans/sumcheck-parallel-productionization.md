@@ -82,7 +82,7 @@ just `delayed_*`. From `src/sumcheck/{gf128,fp128,bn254,bb5_packed,generic}.rs`:
 |------------------------------------------|----------------------------------------------------------|
 | `deg2_boolean`                           | Literal sum over hypercube                               |
 | `deg2_projective`                        | Eval at `(0, 1, ∞)`                                      |
-| `deg2_delayed`                           | Lazy reduction (current Approach 4 target)               |
+| `deg2_delayed`                           | Lazy reduction (current `pinned` target)               |
 | `deg2_eq_delayed`                        | Delayed + eq factor input                                |
 | `deg2_projective_delayed`                | Projective + delayed                                     |
 | `deg2_projective_1inf_delayed`           | Projective with skipped 0-eval                           |
@@ -168,7 +168,7 @@ extraction.
    `g`, ping-pong buffers, current round; methods delegate to the
    existing accumulator types.
 
-3. **Replace `sumcheck_deg2_delayed_{gf128,fp128}_par4_pinned` with
+3. **Replace `sumcheck_deg2_delayed_{gf128,fp128}_pinned` with
    thin wrappers** that construct the impl and call `par_sumcheck`.
    Keep them under their old names so the bench file is
    line-for-line unchanged.
@@ -247,12 +247,12 @@ extraction.
 
 8. **Test on aragorn.** ✅ Done.
    - `cargo test --release --features parallel_chili` on aragorn:
-     all 14 sumcheck tests + 2 `par4_loop` tests + 4
+     all 14 sumcheck tests + 2 `pinned_loop` tests + 4
      `parallel_delayed` tests pass.
    - `cargo bench --bench sumcheck_parallel --features parallel_chili
      -- --warm-up-time 3 --measurement-time 6` saved to
      `target/parallelism-results/aragorn-bench-2026-04.log`.
-   - `examples/par4_ab` sweep (`n ∈ 10..16`, both fields, 3000 iter)
+   - `examples/pinned_ab` sweep (`n ∈ 10..16`, both fields, 3000 iter)
      saved to `target/parallelism-results/aragorn-ab-2026-04.log`.
    - See **Aragorn validation** in `PARALLELISM.md` for the writeup.
      Highlights:
@@ -262,7 +262,7 @@ extraction.
        (Fp128 n=15); on M4 it cost ~4%. Net positive on Linux.
      - Crossover at n ≤ 10 for both fields (M4 was n = 12 / 10).
      - 8-worker cap leaves half of aragorn's 16 cores idle at
-       n ∈ {18, 20}; `par1_scope` (all-core rayon) beats us there.
+       n ∈ {18, 20}; `rayon_scope` (all-core rayon) beats us there.
        Follow-up (Phase B): raise default pool cap to
        `min(physical_cores, 16)` and add more steps to the D2
        shrinkage table.
@@ -270,7 +270,7 @@ extraction.
 ### Acceptance criteria for Phase A
 
 - ✅ All existing correctness tests still pass on M4 + aragorn.
-- ✅ `par4_pinned` GF128 and Fp128 numbers match or beat the current
+- ✅ `pinned` GF128 and Fp128 numbers match or beat the current
   `PARALLELISM.md` table on M4.
 - ~~D1 microbench shows < 5% regression at `k = 2`, > 50 ns saving at
   `k = 8`.~~ D1 shelved (see Task 4). Revisit on larger-Partial
@@ -393,7 +393,7 @@ dependencies.
    - `src/sumcheck/parallel/impls/{gf128,fp128}.rs` rewritten to
      `use sumcheck_parallel::{par_sumcheck, pick_n_workers,
      SumcheckRound};` and are the first downstream implementors.
-   - `src/sumcheck/parallel/legacy.rs` unchanged (Approach 1-3
+   - `src/sumcheck/parallel/legacy.rs` unchanged (`rayon_scope`-3
      baselines, still uses `pinned_pool::PinnedPool` for the
      Approach-3 variant).
    - Main repo's `cargo test --release --features parallel`
@@ -416,7 +416,7 @@ dependencies.
   unchanged (only the `use` paths moved), so no performance delta
   expected.
 - ✅ aragorn full sweep numbers documented in `PARALLELISM.md`
-  "Aragorn, Phase B" section; `par4_pinned` with auto-park + 32
+  "Aragorn, Phase B" section; `pinned` with auto-park + 32
   workers beats all Rayon variants at every `n` for both GF128 and
   Fp128.
 

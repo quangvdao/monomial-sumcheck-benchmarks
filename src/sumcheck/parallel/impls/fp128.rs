@@ -9,9 +9,9 @@ use hachi_pcs::AdditiveGroup as _;
 use pinned_pool::PinnedPool;
 use sumcheck_parallel::{par_sumcheck, pick_n_workers, SumcheckRound};
 
-use super::super::super::fp128::sumcheck_deg2_delayed_fp128;
+use super::super::super::fp128::{sumcheck_deg2_delayed_fp128, sumcheck_deg2_delayed_fp128_fused};
 use super::super::super::Fp128;
-use super::super::legacy::{bind_chunk_fp128, partial_triple_fp128};
+use super::super::legacy::{bind_chunk_fp128, bind_then_reduce_chunk_fp128, partial_triple_fp128};
 
 /// Owns the ping-pong buffers for one sumcheck call. See
 /// [`super::gf128::GF128DelayedRound`] for the rationale behind
@@ -117,16 +117,50 @@ impl SumcheckRound for Fp128DelayedRound {
         let (wf, wg) = self.write_ptrs(round);
         bind_chunk_fp128(rf, rg, wf, wg, lo, len, *r);
     }
+
+    /// Fused bind-(round - 1) + reduce-round in a single pass over the
+    /// round-(round - 1) buffer. `lo` and `len` are in round-`round`
+    /// pair units.
+    #[inline]
+    unsafe fn bind_then_reduce_chunk(
+        &self,
+        round: usize,
+        lo: usize,
+        len: usize,
+        r_prev: &Self::Elem,
+    ) -> Self::Partial {
+        if len == 0 {
+            return (Fp128::ZERO, Fp128::ZERO, Fp128::ZERO);
+        }
+        debug_assert!(round >= 1);
+        let (rf_prev, rg_prev) = self.read_ptrs(round - 1);
+        let (wf, wg) = self.write_ptrs(round - 1);
+        // SAFETY: caller's disjoint-windows contract for round-`round`
+        // pair units, and the ping-pong layout makes
+        // `read_ptrs(round - 1)` (parity `(round - 1) & 1`) and
+        // `write_ptrs(round - 1)` (parity `round & 1`) distinct
+        // buffers for this worker's window.
+        unsafe { bind_then_reduce_chunk_fp128(rf_prev, rg_prev, wf, wg, lo, len, *r_prev) }
+    }
 }
 
 /// Pinned-pool implementation for the Fp128 deg-2 delayed sumcheck.
 ///
-/// See [`super::gf128::sumcheck_deg2_delayed_gf128_par4_pinned`] for
+/// See [`super::gf128::sumcheck_deg2_delayed_gf128_pinned`] for
 /// the orchestration shape.
-pub fn sumcheck_deg2_delayed_fp128_par4_pinned(
+///
+/// `use_fused_path`: if `true`, rounds `1..` of each phase go through
+/// [`Fp128DelayedRound::bind_then_reduce_chunk`] (single pass over
+/// the previous-round buffer for bind + reduce). If `false`, the
+/// classic two-pass `bind_chunk` + `reduce_chunk` protocol is used.
+/// The sequential tail (small-round fallback) follows the same
+/// choice via `sumcheck_deg2_delayed_fp128_fused` vs
+/// `sumcheck_deg2_delayed_fp128`.
+pub fn sumcheck_deg2_delayed_fp128_pinned(
     f: &mut Vec<Fp128>,
     g: &mut Vec<Fp128>,
     challenges: &[Fp128],
+    use_fused_path: bool,
 ) {
     let n_rounds = challenges.len();
     if n_rounds == 0 {
@@ -147,7 +181,11 @@ pub fn sumcheck_deg2_delayed_fp128_par4_pinned(
     );
 
     if n_workers_initial <= 1 {
-        sumcheck_deg2_delayed_fp128(f, g, challenges);
+        if use_fused_path {
+            sumcheck_deg2_delayed_fp128_fused(f, g, challenges);
+        } else {
+            sumcheck_deg2_delayed_fp128(f, g, challenges);
+        }
         return;
     }
 
@@ -163,13 +201,18 @@ pub fn sumcheck_deg2_delayed_fp128_par4_pinned(
         pool,
         n_workers_initial,
         round.initial_pairs(),
+        use_fused_path,
     );
 
     if rounds_done == 0 {
         let (live_f, live_g) = round.into_live_buffers(0);
         *f = live_f;
         *g = live_g;
-        sumcheck_deg2_delayed_fp128(f, g, challenges);
+        if use_fused_path {
+            sumcheck_deg2_delayed_fp128_fused(f, g, challenges);
+        } else {
+            sumcheck_deg2_delayed_fp128(f, g, challenges);
+        }
         return;
     }
 
@@ -181,6 +224,10 @@ pub fn sumcheck_deg2_delayed_fp128_par4_pinned(
     *g = live_g;
 
     if rounds_done < n_rounds {
-        sumcheck_deg2_delayed_fp128(f, g, &challenges[rounds_done..]);
+        if use_fused_path {
+            sumcheck_deg2_delayed_fp128_fused(f, g, &challenges[rounds_done..]);
+        } else {
+            sumcheck_deg2_delayed_fp128(f, g, &challenges[rounds_done..]);
+        }
     }
 }

@@ -3,13 +3,13 @@
 //! For each `n` in `[10, 12, 14, 16, 18, 20]` (or `N_MIN..=N_MAX` if
 //! the env vars are set), runs three implementations interleaved:
 //!
-//! - `par4_pinned`     — our pinned doorbell pool (Approach 4)
-//! - `par1_scope`      — `rayon::scope` (one scope per round)
-//! - `par1_pariter`    — `par_iter().reduce()` (rayon's idiomatic API)
+//! - `pinned`      — our pinned doorbell pool (production)
+//! - `rayon_scope` — `rayon::scope` (one scope per round)
+//! - `rayon_iter`  — `par_iter().reduce()` (rayon's idiomatic API)
 //!
-//! Reports p10/p50/p90 wall time and the speed ratio of `par4_pinned`
+//! Reports p10/p50/p90 wall time and the speed ratio of `pinned`
 //! vs each rayon variant. The mandate from the productionization plan
-//! is that `par4_pinned` is faster (ratio < 1.00) at *every* `n`. Use
+//! is that `pinned` is faster (ratio < 1.00) at *every* `n`. Use
 //! this example to validate that mandate after pool / D2 changes.
 //!
 //! ```text
@@ -104,7 +104,7 @@ struct Row {
 ///
 /// We run each variant as a *burst* (not interleaved) to mirror
 /// Criterion's `bench_with_input` measurement model: in production
-/// nobody alternates `par4_pinned` and `rayon::scope` per call, and
+/// nobody alternates `pinned` and `rayon::scope` per call, and
 /// interleaving them deliberately creates QoS / scheduler thrash that
 /// is not representative of a real workload. The burst structure also
 /// matches `cargo bench --bench sumcheck_parallel`, so numbers here
@@ -130,13 +130,13 @@ fn sweep_one_gf128(n: usize, n_iter: usize) -> Row {
     let clone = || (f_orig.clone(), g_orig.clone());
 
     let mut pin = measure_burst(n_iter, clone, |(mut f, mut g)| {
-        sumcheck_deg2_delayed_gf128_par4_pinned(&mut f, &mut g, &challenges);
+        sumcheck_deg2_delayed_gf128_pinned(&mut f, &mut g, &challenges, false);
     });
     let mut scope = measure_burst(n_iter, clone, |(mut f, mut g)| {
-        sumcheck_deg2_delayed_gf128_par1_scope(&mut f, &mut g, &challenges);
+        sumcheck_deg2_delayed_gf128_rayon_scope(&mut f, &mut g, &challenges);
     });
     let mut pari = measure_burst(n_iter, clone, |(mut f, mut g)| {
-        sumcheck_deg2_delayed_gf128_par1_pariter(&mut f, &mut g, &challenges);
+        sumcheck_deg2_delayed_gf128_rayon_iter(&mut f, &mut g, &challenges);
     });
 
     Row {
@@ -153,13 +153,13 @@ fn sweep_one_fp128(n: usize, n_iter: usize) -> Row {
     let clone = || (f_orig.clone(), g_orig.clone());
 
     let mut pin = measure_burst(n_iter, clone, |(mut f, mut g)| {
-        sumcheck_deg2_delayed_fp128_par4_pinned(&mut f, &mut g, &challenges);
+        sumcheck_deg2_delayed_fp128_pinned(&mut f, &mut g, &challenges, false);
     });
     let mut scope = measure_burst(n_iter, clone, |(mut f, mut g)| {
-        sumcheck_deg2_delayed_fp128_par1_scope(&mut f, &mut g, &challenges);
+        sumcheck_deg2_delayed_fp128_rayon_scope(&mut f, &mut g, &challenges);
     });
     let mut pari = measure_burst(n_iter, clone, |(mut f, mut g)| {
-        sumcheck_deg2_delayed_fp128_par1_pariter(&mut f, &mut g, &challenges);
+        sumcheck_deg2_delayed_fp128_rayon_iter(&mut f, &mut g, &challenges);
     });
 
     Row {
@@ -201,7 +201,7 @@ fn main() {
 
     println!();
     println!(
-        "key: '!' marks rows where par4_pinned is SLOWER than the rayon \
+        "key: '!' marks rows where pinned is SLOWER than the rayon \
          variant (we want zero '!')"
     );
 }

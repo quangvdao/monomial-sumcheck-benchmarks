@@ -1,14 +1,25 @@
-//! A/B profiler: new `par_sumcheck` (trait + D2 multi-phase) vs
-//! `par4_pinned_legacy` (direct pointer captures, single broadcast, no
-//! D2). Both run on the same `PinnedPool`, so this isolates the
-//! scheduler refactor cost from the pool refactor.
+//! A/B profiler over the pinned-pool sumcheck paths. Three
+//! configurations, interleaved round-robin to share cache / thermal
+//! conditions across samples:
+//!
+//! 1. `NEW_FUSED`: trait + D2 multi-phase, `use_fused_path = true`.
+//!    Rounds 1+ of each phase go through
+//!    `SumcheckRound::bind_then_reduce_chunk` (single pass over the
+//!    previous-round buffer for bind + reduce).
+//! 2. `NEW_UNFUSED`: trait + D2 multi-phase, `use_fused_path = false`.
+//!    Classic split `reduce_chunk` + `bind_chunk` protocol.
+//! 3. `LEGACY`: single-broadcast, no D2, direct pointer captures.
+//!    Kept as a reference for the earlier productionization work.
+//!
+//! Primary A/B of interest for the fused-bind-eval investigation:
+//! `NEW_FUSED` vs `NEW_UNFUSED`. The `LEGACY` row is informational.
 //!
 //! ```text
-//! N=16 FIELD=gf128 N_ITER=2000 cargo run --example par4_ab --release \
+//! N=16 FIELD=gf128 N_ITER=2000 cargo run --example pinned_ab --release \
 //!     --features parallel
 //! ```
 //!
-//! Reports p10/p50/p90/p99 wall time per call for both implementations.
+//! Reports p10/p50/p90/p99 wall time per call for all three.
 
 #![cfg(feature = "parallel")]
 
@@ -48,7 +59,8 @@ fn main() {
     eprintln!("n={n} field={field} n_iter={n_iter}");
     PinnedPool::global().broadcast_scoped(PinnedPool::global().n_workers(), &|_| {});
 
-    let mut samples_new: Vec<f64> = Vec::with_capacity(n_iter);
+    let mut samples_fused: Vec<f64> = Vec::with_capacity(n_iter);
+    let mut samples_unfused: Vec<f64> = Vec::with_capacity(n_iter);
     let mut samples_legacy: Vec<f64> = Vec::with_capacity(n_iter);
 
     if field == "fp128" {
@@ -58,18 +70,22 @@ fn main() {
 
         // Interleave to share thermal / cache conditions across calls.
         for _ in 0..n_iter {
-            // New
             let mut f = f_orig.clone();
             let mut g = g_orig.clone();
             let t = Instant::now();
-            sumcheck_deg2_delayed_fp128_par4_pinned(&mut f, &mut g, &challenges);
-            samples_new.push(t.elapsed().as_secs_f64() * 1e6);
+            sumcheck_deg2_delayed_fp128_pinned(&mut f, &mut g, &challenges, true);
+            samples_fused.push(t.elapsed().as_secs_f64() * 1e6);
 
-            // Legacy
             let mut f = f_orig.clone();
             let mut g = g_orig.clone();
             let t = Instant::now();
-            sumcheck_deg2_delayed_fp128_par4_pinned_legacy(&mut f, &mut g, &challenges);
+            sumcheck_deg2_delayed_fp128_pinned(&mut f, &mut g, &challenges, false);
+            samples_unfused.push(t.elapsed().as_secs_f64() * 1e6);
+
+            let mut f = f_orig.clone();
+            let mut g = g_orig.clone();
+            let t = Instant::now();
+            sumcheck_deg2_delayed_fp128_pinned_v0(&mut f, &mut g, &challenges);
             samples_legacy.push(t.elapsed().as_secs_f64() * 1e6);
         }
     } else {
@@ -81,17 +97,24 @@ fn main() {
             let mut f = f_orig.clone();
             let mut g = g_orig.clone();
             let t = Instant::now();
-            sumcheck_deg2_delayed_gf128_par4_pinned(&mut f, &mut g, &challenges);
-            samples_new.push(t.elapsed().as_secs_f64() * 1e6);
+            sumcheck_deg2_delayed_gf128_pinned(&mut f, &mut g, &challenges, true);
+            samples_fused.push(t.elapsed().as_secs_f64() * 1e6);
 
             let mut f = f_orig.clone();
             let mut g = g_orig.clone();
             let t = Instant::now();
-            sumcheck_deg2_delayed_gf128_par4_pinned_legacy(&mut f, &mut g, &challenges);
+            sumcheck_deg2_delayed_gf128_pinned(&mut f, &mut g, &challenges, false);
+            samples_unfused.push(t.elapsed().as_secs_f64() * 1e6);
+
+            let mut f = f_orig.clone();
+            let mut g = g_orig.clone();
+            let t = Instant::now();
+            sumcheck_deg2_delayed_gf128_pinned_v0(&mut f, &mut g, &challenges);
             samples_legacy.push(t.elapsed().as_secs_f64() * 1e6);
         }
     }
 
-    print_row(&format!("{field} NEW (trait+D2)"), n, &mut samples_new);
-    print_row(&format!("{field} LEGACY (single-broadcast)"), n, &mut samples_legacy);
+    print_row(&format!("{field} NEW_FUSED"), n, &mut samples_fused);
+    print_row(&format!("{field} NEW_UNFUSED"), n, &mut samples_unfused);
+    print_row(&format!("{field} LEGACY"), n, &mut samples_legacy);
 }

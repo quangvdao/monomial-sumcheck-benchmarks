@@ -1,36 +1,35 @@
-//! Parallel wrappers for the delayed sumcheck kernels, covering three approaches.
+//! Legacy parallel wrappers for the delayed sumcheck kernels, covering the
+//! variants we benched before settling on `pinned`. The production code
+//! path is [`super::impls::*::sumcheck_deg2_delayed_*_pinned`]; everything
+//! in this module is kept as A/B baselines and correctness references.
 //!
-//! **Approach 1 — manual chunked `rayon::scope`** (`*_par1_scope`): one
-//! `rayon::scope` per round with exactly `n_workers` spawns. Reduce and bind
-//! are fused into the same worker closure, so each round pays exactly one
-//! scope-level dispatch. A `*_par1_pariter` control uses
-//! `(0..n_workers).into_par_iter()` + `par_chunks_mut` to isolate the manual
-//! vs. par_iter dispatch difference.
+//! **`rayon_scope`**: one `rayon::scope` per round with exactly `n_workers`
+//! spawns. Reduce and bind are fused into the same worker closure, so each
+//! round pays exactly one scope-level dispatch. A sibling `rayon_iter`
+//! variant uses `(0..n_workers).into_par_iter()` + `par_chunks_mut` to
+//! isolate the manual-spawn vs. par_iter dispatch difference (same
+//! fork-join semantics, different rayon API surface).
 //!
-//! **Approach 2 — chili recursive fork/join** (`*_par2_chili`): uses
-//! `chili::Scope::global()` with recursive `scope.join(left, right)` down to a
-//! `base` pair-count threshold. Chili's workers don't park, so dispatch cost
-//! is bounded by a spinning handoff rather than the rayon wake-up floor.
+//! **`chili`** (feature-gated `parallel_chili`): uses `chili::Scope::global()`
+//! with recursive `scope.join(left, right)` down to a `base` pair-count
+//! threshold. Chili's workers don't park, so dispatch cost is bounded by
+//! a spinning handoff rather than the rayon wake-up floor.
 //!
-//! **Approach 3 — persistent pool + atomic barrier** (`*_par3_persistent`):
-//! spends one `rayon::scope` for the entire call. Workers run all rounds
-//! in-thread on a fixed contiguous chunk of the data; cross-round sync is via
-//! two `AtomicUsize` counters (one published by workers after reduce, one
-//! published by main after black_box). Buffers ping-pong between two
-//! preallocated arenas. Once per-worker chunks shrink below a threshold, we
-//! exit the scope and finish remaining rounds on the main thread via the
-//! sequential kernel.
+//! **`persistent`**: spends one `rayon::scope` for the entire call. Workers
+//! run all rounds in-thread on a fixed contiguous chunk of the data;
+//! cross-round sync is via two `AtomicUsize` counters (one published by
+//! workers after reduce, one published by main after `black_box`).
+//! Buffers ping-pong between two preallocated arenas. Once per-worker
+//! chunks shrink below a threshold, we exit the scope and finish the
+//! remaining rounds on the main thread via the sequential kernel.
 //!
-//! **Approach 4 — globally-persistent pinned pool + doorbell** (`*_par4_pinned`):
-//! a process-global `std::thread` pool spawned lazily on first use, with
-//! each worker marked `QOS_CLASS_USER_INTERACTIVE` on macOS to keep them on
-//! P-cores. Task dispatch is via a Release/Acquire epoch counter
-//! (`broadcast_scoped`); workers never park. This removes the per-call
-//! `rayon::scope` setup cost that dominates at small `n` in Approach 3.
-//! The pool defaults to at most 8 workers (vs rayon's default of
-//! `available_parallelism()`) to reduce barrier-counter contention on
-//! heterogeneous-core silicon. Inside one call the protocol is identical
-//! to Approach 3 (reduce_counter / bind_go atomics, ping-pong buffers).
+//! **`pinned_v0`**: the first cut of the pinned-pool + doorbell variant,
+//! one `broadcast_scoped` for the entire call, no D2 schedule. Kept here
+//! as an A/B baseline against the trait+scheduler implementation in
+//! [`super::impls::*::sumcheck_deg2_delayed_*_pinned`]. The production
+//! version drives the same `pinned_pool::PinnedPool` from inside the
+//! generic `sumcheck_parallel::par_sumcheck` scheduler, which applies
+//! D2 per-round `n_active` shrinkage and the fused reduce+bind pattern.
 //!
 //! **Bind safety.** All approaches write the bound output out-of-place into a
 //! scratch buffer and swap it in after sync, to avoid the in-place read-after-
@@ -66,7 +65,7 @@ fn n_chunks(half: usize) -> usize {
     rayon::current_num_threads().max(1).min(half.max(1))
 }
 
-// -------------------- Shared helpers for Approach 3 --------------------
+// -------------------- Shared helpers for `persistent` + `pinned_v0` --------------------
 
 /// A `*mut T` wrapper that is `Send + Sync`. Used only inside `rayon::scope`
 /// closures where the pointed-to region is kept alive by the outer stack frame
@@ -84,26 +83,27 @@ unsafe impl<T> Sync for SendPtr<T> {}
 struct SharedSlots<T>(Vec<UnsafeCell<T>>);
 unsafe impl<T: Send> Sync for SharedSlots<T> {}
 
-/// How many rounds Phase-3 runs inside the persistent scope before cutting
-/// over to the sequential kernel. The per-worker pair count halves each round
-/// we keep in the scope.
-const PAR3_MIN_PAIRS_PER_WORKER: usize = 8;
+/// How many rounds the `persistent` variant runs inside the persistent
+/// scope before cutting over to the sequential kernel. The per-worker pair
+/// count halves each round we keep in the scope. Shared by `pinned_v0`.
+const PERSISTENT_MIN_PAIRS_PER_WORKER: usize = 8;
 
 /// Returns the number of rounds to keep inside the persistent scope for
-/// Approach 3, given an initial pair count and worker count.
+/// the `persistent` and `pinned_v0` variants, given an initial pair count
+/// and worker count.
 #[inline]
-fn par3_scope_rounds(initial_pairs: usize, n_workers: usize, n_rounds: usize) -> usize {
+fn persistent_scope_rounds(initial_pairs: usize, n_workers: usize, n_rounds: usize) -> usize {
     if n_workers <= 1 || n_rounds == 0 {
         return 0;
     }
     let initial_per_worker = initial_pairs / n_workers;
-    if initial_per_worker < PAR3_MIN_PAIRS_PER_WORKER {
+    if initial_per_worker < PERSISTENT_MIN_PAIRS_PER_WORKER {
         return 0;
     }
     // Keep the scope while `initial_per_worker >> r >= MIN`, i.e.
     // r <= floor(log2(initial_per_worker / MIN)). Number of runnable rounds is
     // that plus one (for r = 0).
-    let ratio = initial_per_worker / PAR3_MIN_PAIRS_PER_WORKER;
+    let ratio = initial_per_worker / PERSISTENT_MIN_PAIRS_PER_WORKER;
     let max_scope_rounds = ratio.ilog2() as usize + 1;
     max_scope_rounds.min(n_rounds)
 }
@@ -114,7 +114,7 @@ fn par3_scope_rounds(initial_pairs: usize, n_workers: usize, n_rounds: usize) ->
 ///
 /// One `rayon::scope` per round. Each spawn covers one contiguous chunk and
 /// performs reduce + bind fused.
-pub fn sumcheck_deg2_delayed_gf128_par1_scope(
+pub fn sumcheck_deg2_delayed_gf128_rayon_scope(
     f: &mut Vec<GF128>,
     g: &mut Vec<GF128>,
     challenges: &[GF128],
@@ -207,7 +207,7 @@ pub fn sumcheck_deg2_delayed_gf128_par1_scope(
 }
 
 /// `par_iter`-based control version of `sumcheck_deg2_delayed_gf128`.
-pub fn sumcheck_deg2_delayed_gf128_par1_pariter(
+pub fn sumcheck_deg2_delayed_gf128_rayon_iter(
     f: &mut Vec<GF128>,
     g: &mut Vec<GF128>,
     challenges: &[GF128],
@@ -293,7 +293,7 @@ pub fn sumcheck_deg2_delayed_gf128_par1_pariter(
 // ----------------------------- Fp128 delayed -----------------------------
 
 /// Manual chunked `rayon::scope` version of `sumcheck_deg2_delayed_fp128`.
-pub fn sumcheck_deg2_delayed_fp128_par1_scope(
+pub fn sumcheck_deg2_delayed_fp128_rayon_scope(
     f: &mut Vec<Fp128>,
     g: &mut Vec<Fp128>,
     challenges: &[Fp128],
@@ -386,7 +386,7 @@ pub fn sumcheck_deg2_delayed_fp128_par1_scope(
 }
 
 /// `par_iter`-based control version of `sumcheck_deg2_delayed_fp128`.
-pub fn sumcheck_deg2_delayed_fp128_par1_pariter(
+pub fn sumcheck_deg2_delayed_fp128_rayon_iter(
     f: &mut Vec<Fp128>,
     g: &mut Vec<Fp128>,
     challenges: &[Fp128],
@@ -470,7 +470,7 @@ pub fn sumcheck_deg2_delayed_fp128_par1_pariter(
 }
 
 // ===========================================================================
-// Approach 2: chili recursive fork/join
+// `chili`: chili recursive fork/join
 // ===========================================================================
 
 #[cfg(feature = "parallel_chili")]
@@ -546,7 +546,7 @@ mod chili_impl {
         );
     }
 
-    pub fn sumcheck_deg2_delayed_gf128_par2_chili(
+    pub fn sumcheck_deg2_delayed_gf128_chili(
         f: &mut Vec<GF128>,
         g: &mut Vec<GF128>,
         challenges: &[GF128],
@@ -655,7 +655,7 @@ mod chili_impl {
         );
     }
 
-    pub fn sumcheck_deg2_delayed_fp128_par2_chili(
+    pub fn sumcheck_deg2_delayed_fp128_chili(
         f: &mut Vec<Fp128>,
         g: &mut Vec<Fp128>,
         challenges: &[Fp128],
@@ -698,11 +698,11 @@ mod chili_impl {
 
 #[cfg(feature = "parallel_chili")]
 pub use chili_impl::{
-    sumcheck_deg2_delayed_fp128_par2_chili, sumcheck_deg2_delayed_gf128_par2_chili,
+    sumcheck_deg2_delayed_fp128_chili, sumcheck_deg2_delayed_gf128_chili,
 };
 
 // ===========================================================================
-// Approach 3: persistent pool + atomic barrier
+// `persistent`: rayon scope + persistent workers + atomic barrier
 // ===========================================================================
 
 // Per-round sync layout:
@@ -722,7 +722,7 @@ pub use chili_impl::{
 // itself wrote last round. Self-read → no cross-worker hazard.
 //
 // The live_pairs-not-divisible-by-n_workers case is handled by bailing out
-// of the scope early (via `par3_scope_rounds`) before alignment breaks.
+// of the scope early (via `persistent_scope_rounds`) before alignment breaks.
 
 #[inline]
 pub(super) fn partial_triple_gf128(
@@ -820,6 +820,110 @@ pub(super) fn bind_chunk_fp128(
     }
 }
 
+/// Fused bind-(prev) + reduce-(current) in one pass over the
+/// previous-round buffer. `lo` / `n_pairs` are in **current-round
+/// pair units**: the j-th iteration reads positions
+/// `[(lo + j) * 4, (lo + j) * 4 + 4)` of the previous-round buffer,
+/// writes positions `[(lo + j) * 2, (lo + j) * 2 + 2)` of the
+/// current-round buffer, and accumulates `h0 / h1 / h_inf` for the
+/// current round's partial from the freshly bound pair.
+///
+/// # Safety
+///
+/// `rf_prev / rg_prev` must be readable for at least
+/// `(lo + n_pairs) * 4` elements; `wf / wg` must be writable for at
+/// least `(lo + n_pairs) * 2` elements. In the scheduler the
+/// ping-pong layout guarantees `rf_prev` / `wf` are distinct
+/// allocations, so no aliasing.
+#[inline]
+pub(super) unsafe fn bind_then_reduce_chunk_gf128(
+    rf_prev: *const GF128,
+    rg_prev: *const GF128,
+    wf: *mut GF128,
+    wg: *mut GF128,
+    lo: usize,
+    n_pairs: usize,
+    r_prev: GF128,
+) -> (GF128, GF128, GF128) {
+    let mut h0 = GF128Accum::zero();
+    let mut h1 = GF128Accum::zero();
+    let mut h_inf = GF128Accum::zero();
+    unsafe {
+        for j in 0..n_pairs {
+            let base_prev = (lo + j) * 4;
+            let f00 = *rf_prev.add(base_prev);
+            let f01 = *rf_prev.add(base_prev + 1);
+            let f10 = *rf_prev.add(base_prev + 2);
+            let f11 = *rf_prev.add(base_prev + 3);
+            let g00 = *rg_prev.add(base_prev);
+            let g01 = *rg_prev.add(base_prev + 1);
+            let g10 = *rg_prev.add(base_prev + 2);
+            let g11 = *rg_prev.add(base_prev + 3);
+
+            let f0 = f00 + r_prev * (f01 - f00);
+            let f1 = f10 + r_prev * (f11 - f10);
+            let g0 = g00 + r_prev * (g01 - g00);
+            let g1 = g10 + r_prev * (g11 - g10);
+
+            let base_cur = (lo + j) * 2;
+            *wf.add(base_cur) = f0;
+            *wf.add(base_cur + 1) = f1;
+            *wg.add(base_cur) = g0;
+            *wg.add(base_cur + 1) = g1;
+
+            h0.fmadd(f0, g0);
+            h1.fmadd(f1, g1);
+            h_inf.fmadd(f1 - f0, g1 - g0);
+        }
+    }
+    (h0.reduce(), h1.reduce(), h_inf.reduce())
+}
+
+/// Fp128 twin of [`bind_then_reduce_chunk_gf128`]. Same contract.
+#[inline]
+pub(super) unsafe fn bind_then_reduce_chunk_fp128(
+    rf_prev: *const Fp128,
+    rg_prev: *const Fp128,
+    wf: *mut Fp128,
+    wg: *mut Fp128,
+    lo: usize,
+    n_pairs: usize,
+    r_prev: Fp128,
+) -> (Fp128, Fp128, Fp128) {
+    let mut h0 = Fp128Accum::zero();
+    let mut h1 = Fp128Accum::zero();
+    let mut h_inf = Fp128Accum::zero();
+    unsafe {
+        for j in 0..n_pairs {
+            let base_prev = (lo + j) * 4;
+            let f00 = *rf_prev.add(base_prev);
+            let f01 = *rf_prev.add(base_prev + 1);
+            let f10 = *rf_prev.add(base_prev + 2);
+            let f11 = *rf_prev.add(base_prev + 3);
+            let g00 = *rg_prev.add(base_prev);
+            let g01 = *rg_prev.add(base_prev + 1);
+            let g10 = *rg_prev.add(base_prev + 2);
+            let g11 = *rg_prev.add(base_prev + 3);
+
+            let f0 = (f01 - f00).mul_add(r_prev, f00);
+            let f1 = (f11 - f10).mul_add(r_prev, f10);
+            let g0 = (g01 - g00).mul_add(r_prev, g00);
+            let g1 = (g11 - g10).mul_add(r_prev, g10);
+
+            let base_cur = (lo + j) * 2;
+            *wf.add(base_cur) = f0;
+            *wf.add(base_cur + 1) = f1;
+            *wg.add(base_cur) = g0;
+            *wg.add(base_cur + 1) = g1;
+
+            h0.fmadd(f0, g0);
+            h1.fmadd(f1, g1);
+            h_inf.fmadd(f1 - f0, g1 - g0);
+        }
+    }
+    (h0.reduce(), h1.reduce(), h_inf.reduce())
+}
+
 #[inline]
 pub(super) fn worker_chunk_range(
     live_pairs: usize,
@@ -858,7 +962,7 @@ fn spin_until_ge(counter: &AtomicUsize, target: usize) {
 }
 
 /// Persistent-pool + atomic-barrier implementation for GF128.
-pub fn sumcheck_deg2_delayed_gf128_par3_persistent(
+pub fn sumcheck_deg2_delayed_gf128_persistent(
     f: &mut Vec<GF128>,
     g: &mut Vec<GF128>,
     challenges: &[GF128],
@@ -873,7 +977,7 @@ pub fn sumcheck_deg2_delayed_gf128_par3_persistent(
     }
     let initial_pairs = initial_len / 2;
     let n_workers = rayon::current_num_threads().max(1).min(initial_pairs.max(1));
-    let scope_rounds = par3_scope_rounds(initial_pairs, n_workers, n_rounds);
+    let scope_rounds = persistent_scope_rounds(initial_pairs, n_workers, n_rounds);
 
     if scope_rounds == 0 {
         super::super::gf128::sumcheck_deg2_delayed_gf128(f, g, challenges);
@@ -982,7 +1086,7 @@ pub fn sumcheck_deg2_delayed_gf128_par3_persistent(
 }
 
 /// Persistent-pool + atomic-barrier implementation for Fp128.
-pub fn sumcheck_deg2_delayed_fp128_par3_persistent(
+pub fn sumcheck_deg2_delayed_fp128_persistent(
     f: &mut Vec<Fp128>,
     g: &mut Vec<Fp128>,
     challenges: &[Fp128],
@@ -997,7 +1101,7 @@ pub fn sumcheck_deg2_delayed_fp128_par3_persistent(
     }
     let initial_pairs = initial_len / 2;
     let n_workers = rayon::current_num_threads().max(1).min(initial_pairs.max(1));
-    let scope_rounds = par3_scope_rounds(initial_pairs, n_workers, n_rounds);
+    let scope_rounds = persistent_scope_rounds(initial_pairs, n_workers, n_rounds);
 
     if scope_rounds == 0 {
         super::super::fp128::sumcheck_deg2_delayed_fp128(f, g, challenges);
@@ -1097,35 +1201,36 @@ pub fn sumcheck_deg2_delayed_fp128_par3_persistent(
 }
 
 // ============================================================================
-// Approach 4 lives in the `impls/` module plus the external
-// `sumcheck-parallel` crate now.
+// The production `pinned` variant lives in `impls/` plus the external
+// `sumcheck-parallel` crate.
 // ============================================================================
 // The pool is `pinned_pool::PinnedPool`. The trait + driver live in
 // the `sumcheck-parallel` crate (`~/Documents/SNARKs/sumcheck-parallel/`).
-// The public wrappers (`sumcheck_deg2_delayed_{gf128,fp128}_par4_pinned`)
+// The public wrappers (`sumcheck_deg2_delayed_{gf128,fp128}_pinned`)
 // live in `super::impls::{gf128,fp128}` and reuse the helpers above
 // (`partial_triple_*`, `bind_chunk_*`, `worker_chunk_range`).
 
 // ============================================================================
-// Legacy single-broadcast par4 wrappers (kept for A/B against the new
-// trait-based scheduler). Direct `[SendPtr; 2]` captures, single
-// `pool.broadcast_scoped(n_workers, ...)` call, no D2 multi-phase
-// shrinkage, no trait dispatch. Same `PinnedPool` as the new code.
+// Legacy single-broadcast `pinned_v0` wrappers (kept for A/B against the
+// trait+scheduler `pinned` implementation). Direct `[SendPtr; 2]`
+// captures, single `pool.broadcast_scoped(n_workers, ...)` call, no D2
+// multi-phase shrinkage, no trait dispatch. Same `PinnedPool` as the
+// production code.
 // ============================================================================
 
-const PAR4_TARGET_PAIRS_PER_WORKER: usize = 256;
+const PINNED_TARGET_PAIRS_PER_WORKER: usize = 256;
 
 #[inline]
-fn par4_n_workers(initial_pairs: usize, pool_total: usize) -> usize {
-    (initial_pairs / PAR4_TARGET_PAIRS_PER_WORKER)
+fn pinned_n_workers(initial_pairs: usize, pool_total: usize) -> usize {
+    (initial_pairs / PINNED_TARGET_PAIRS_PER_WORKER)
         .max(2)
         .min(pool_total)
 }
 
-/// Original single-broadcast `par4_pinned` for GF128 (no D2). Used as
-/// an A/B baseline against the new trait+scheduler implementation in
-/// `super::impls::gf128::sumcheck_deg2_delayed_gf128_par4_pinned`.
-pub fn sumcheck_deg2_delayed_gf128_par4_pinned_legacy(
+/// Original single-broadcast pinned variant for GF128 (no D2). Used as
+/// an A/B baseline against the trait+scheduler implementation in
+/// `super::impls::gf128::sumcheck_deg2_delayed_gf128_pinned`.
+pub fn sumcheck_deg2_delayed_gf128_pinned_v0(
     f: &mut Vec<GF128>,
     g: &mut Vec<GF128>,
     challenges: &[GF128],
@@ -1142,8 +1247,8 @@ pub fn sumcheck_deg2_delayed_gf128_par4_pinned_legacy(
 
     let pool = pinned_pool::PinnedPool::global();
     let pool_total = pool.n_workers();
-    let n_workers = par4_n_workers(initial_pairs, pool_total);
-    let scope_rounds = par3_scope_rounds(initial_pairs, n_workers, n_rounds);
+    let n_workers = pinned_n_workers(initial_pairs, pool_total);
+    let scope_rounds = persistent_scope_rounds(initial_pairs, n_workers, n_rounds);
 
     if scope_rounds == 0 || n_workers <= 1 {
         super::super::gf128::sumcheck_deg2_delayed_gf128(f, g, challenges);
@@ -1234,9 +1339,9 @@ pub fn sumcheck_deg2_delayed_gf128_par4_pinned_legacy(
     }
 }
 
-/// Original single-broadcast `par4_pinned` for Fp128 (no D2). A/B
-/// baseline against `super::impls::fp128::sumcheck_deg2_delayed_fp128_par4_pinned`.
-pub fn sumcheck_deg2_delayed_fp128_par4_pinned_legacy(
+/// Original single-broadcast pinned variant for Fp128 (no D2). A/B
+/// baseline against `super::impls::fp128::sumcheck_deg2_delayed_fp128_pinned`.
+pub fn sumcheck_deg2_delayed_fp128_pinned_v0(
     f: &mut Vec<Fp128>,
     g: &mut Vec<Fp128>,
     challenges: &[Fp128],
@@ -1253,8 +1358,8 @@ pub fn sumcheck_deg2_delayed_fp128_par4_pinned_legacy(
 
     let pool = pinned_pool::PinnedPool::global();
     let pool_total = pool.n_workers();
-    let n_workers = par4_n_workers(initial_pairs, pool_total);
-    let scope_rounds = par3_scope_rounds(initial_pairs, n_workers, n_rounds);
+    let n_workers = pinned_n_workers(initial_pairs, pool_total);
+    let scope_rounds = persistent_scope_rounds(initial_pairs, n_workers, n_rounds);
 
     if scope_rounds == 0 || n_workers <= 1 {
         super::super::fp128::sumcheck_deg2_delayed_fp128(f, g, challenges);

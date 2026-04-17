@@ -68,11 +68,11 @@ harness = false
 required-features = ["parallel"]
 
 [[example]]
-name = "par4_ab"
+name = "pinned_ab"
 required-features = ["parallel"]
 
 [[example]]
-name = "par4_repro"
+name = "pinned_repro"
 required-features = ["parallel"]
 
 [[example]]
