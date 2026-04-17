@@ -57,7 +57,10 @@ fn percentiles(samples: &mut [f64]) -> (f64, f64, f64) {
 
 /// Auto-pick iteration count so total wall time per n stays roughly
 /// constant. Sequential `delayed` at n=20 GF128 is ~100 ms on aragorn,
-/// so 50 iters = 5 s. n=10 is ~50 µs, so 20000 iters = 1 s.
+/// so 50 iters = 5 s. n=10 is ~50 µs, so 20000 iters = 1 s. For the
+/// very large end (n >= 22) per-call wall time dominates and clones
+/// bite into memory bandwidth, so we drop iter counts to keep total
+/// wall time bounded while still getting a usable p50.
 fn default_iters(n: usize) -> usize {
     match n {
         0..=10 => 4000,
@@ -66,7 +69,9 @@ fn default_iters(n: usize) -> usize {
         15..=16 => 400,
         17..=18 => 150,
         19..=20 => 60,
-        _ => 30,
+        21..=22 => 30,
+        23..=24 => 15,
+        _ => 8,
     }
 }
 
