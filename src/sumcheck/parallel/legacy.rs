@@ -89,14 +89,6 @@ unsafe impl<T: Send> Sync for SharedSlots<T> {}
 /// we keep in the scope.
 const PAR3_MIN_PAIRS_PER_WORKER: usize = 8;
 
-/// Target pairs-per-worker in the first round for Approach 4. Used to pick
-/// `n_active` adaptively: we want at least this much work per worker to
-/// amortise the per-dispatch barrier cost (which scales with `n_active`
-/// on the `done` cache line). Tuned empirically on M4 Max: at 170 the
-/// `n = 10` case (512 initial pairs) picks 3 active workers, which is the
-/// sweet spot between barrier contention and parallelism.
-const PAR4_TARGET_PAIRS_PER_WORKER: usize = 256;
-
 /// Returns the number of rounds to keep inside the persistent scope for
 /// Approach 3, given an initial pair count and worker count.
 #[inline]
@@ -732,7 +724,8 @@ pub use chili_impl::{
 // The live_pairs-not-divisible-by-n_workers case is handled by bailing out
 // of the scope early (via `par3_scope_rounds`) before alignment breaks.
 
-fn partial_triple_gf128(
+#[inline]
+pub(super) fn partial_triple_gf128(
     rf: *const GF128,
     rg: *const GF128,
     lo: usize,
@@ -757,7 +750,8 @@ fn partial_triple_gf128(
     (h0.reduce(), h1.reduce(), h_inf.reduce())
 }
 
-fn bind_chunk_gf128(
+#[inline]
+pub(super) fn bind_chunk_gf128(
     rf: *const GF128,
     rg: *const GF128,
     wf: *mut GF128,
@@ -778,7 +772,8 @@ fn bind_chunk_gf128(
     }
 }
 
-fn partial_triple_fp128(
+#[inline]
+pub(super) fn partial_triple_fp128(
     rf: *const Fp128,
     rg: *const Fp128,
     lo: usize,
@@ -803,7 +798,8 @@ fn partial_triple_fp128(
     (h0.reduce(), h1.reduce(), h_inf.reduce())
 }
 
-fn bind_chunk_fp128(
+#[inline]
+pub(super) fn bind_chunk_fp128(
     rf: *const Fp128,
     rg: *const Fp128,
     wf: *mut Fp128,
@@ -825,7 +821,11 @@ fn bind_chunk_fp128(
 }
 
 #[inline]
-fn worker_chunk_range(live_pairs: usize, n_workers: usize, worker_idx: usize) -> (usize, usize) {
+pub(super) fn worker_chunk_range(
+    live_pairs: usize,
+    n_workers: usize,
+    worker_idx: usize,
+) -> (usize, usize) {
     let chunk = live_pairs.div_ceil(n_workers);
     let lo = (worker_idx * chunk).min(live_pairs);
     let hi = ((worker_idx + 1) * chunk).min(live_pairs);
@@ -1097,18 +1097,34 @@ pub fn sumcheck_deg2_delayed_fp128_par3_persistent(
 }
 
 // ============================================================================
-// Approach 4: Globally-persistent pinned pool with doorbell synchronization
+// Approach 4 lives in the `impls/` and `scheduler` modules now.
 // ============================================================================
-//
-// The pool itself lives in `super::pool`; the wrappers below just consume
-// it. See `super::pool::PinnedPool::broadcast_scoped` for the dispatch
-// protocol. The internal per-round protocol (reduce_counter / bind_go
-// atomics, ping-pong buffers) is identical to Approach 3.
+// The pool extracted to `super::pool`. The trait + driver live in
+// `super::field` and `super::scheduler`. The public wrappers
+// (`sumcheck_deg2_delayed_{gf128,fp128}_par4_pinned`) live in
+// `super::impls::{gf128,fp128}` and reuse the helpers above
+// (`partial_triple_*`, `bind_chunk_*`, `worker_chunk_range`).
 
-use super::pool::PinnedPool;
+// ============================================================================
+// Legacy single-broadcast par4 wrappers (kept for A/B against the new
+// trait-based scheduler). Direct `[SendPtr; 2]` captures, single
+// `pool.broadcast_scoped(n_workers, ...)` call, no D2 multi-phase
+// shrinkage, no trait dispatch. Same `PinnedPool` as the new code.
+// ============================================================================
 
-/// Pinned-pool implementation for GF128 sumcheck.
-pub fn sumcheck_deg2_delayed_gf128_par4_pinned(
+const PAR4_TARGET_PAIRS_PER_WORKER: usize = 256;
+
+#[inline]
+fn par4_n_workers(initial_pairs: usize, pool_total: usize) -> usize {
+    (initial_pairs / PAR4_TARGET_PAIRS_PER_WORKER)
+        .max(2)
+        .min(pool_total)
+}
+
+/// Original single-broadcast `par4_pinned` for GF128 (no D2). Used as
+/// an A/B baseline against the new trait+scheduler implementation in
+/// `super::impls::gf128::sumcheck_deg2_delayed_gf128_par4_pinned`.
+pub fn sumcheck_deg2_delayed_gf128_par4_pinned_legacy(
     f: &mut Vec<GF128>,
     g: &mut Vec<GF128>,
     challenges: &[GF128],
@@ -1123,14 +1139,9 @@ pub fn sumcheck_deg2_delayed_gf128_par4_pinned(
     }
     let initial_pairs = initial_len / 2;
 
-    let pool = PinnedPool::global();
+    let pool = super::pool::PinnedPool::global();
     let pool_total = pool.n_workers();
-    // Adaptive: keep ~`PAR4_TARGET_PAIRS_PER_WORKER` pairs per worker in
-    // the first round. Below that, barrier contention on `done` dominates
-    // real work.
-    let n_workers = (initial_pairs / PAR4_TARGET_PAIRS_PER_WORKER)
-        .max(2)
-        .min(pool_total);
+    let n_workers = par4_n_workers(initial_pairs, pool_total);
     let scope_rounds = par3_scope_rounds(initial_pairs, n_workers, n_rounds);
 
     if scope_rounds == 0 || n_workers <= 1 {
@@ -1161,8 +1172,6 @@ pub fn sumcheck_deg2_delayed_gf128_par4_pinned(
     let bg_ref = &bind_go;
 
     let worker_body = |worker_idx: usize| {
-        // `broadcast_scoped(n_workers, ...)` guarantees we're only called
-        // for `worker_idx < n_workers`; inactive pool workers never enter.
         let rw_f: [SendPtr<GF128>; 2] = [buf0_f_ptr, buf1_f_ptr];
         let rw_g: [SendPtr<GF128>; 2] = [buf0_g_ptr, buf1_g_ptr];
 
@@ -1224,8 +1233,9 @@ pub fn sumcheck_deg2_delayed_gf128_par4_pinned(
     }
 }
 
-/// Pinned-pool implementation for Fp128 sumcheck.
-pub fn sumcheck_deg2_delayed_fp128_par4_pinned(
+/// Original single-broadcast `par4_pinned` for Fp128 (no D2). A/B
+/// baseline against `super::impls::fp128::sumcheck_deg2_delayed_fp128_par4_pinned`.
+pub fn sumcheck_deg2_delayed_fp128_par4_pinned_legacy(
     f: &mut Vec<Fp128>,
     g: &mut Vec<Fp128>,
     challenges: &[Fp128],
@@ -1240,14 +1250,9 @@ pub fn sumcheck_deg2_delayed_fp128_par4_pinned(
     }
     let initial_pairs = initial_len / 2;
 
-    let pool = PinnedPool::global();
+    let pool = super::pool::PinnedPool::global();
     let pool_total = pool.n_workers();
-    // Adaptive: keep ~`PAR4_TARGET_PAIRS_PER_WORKER` pairs per worker in
-    // the first round. Fp128's per-pair work is heavier than GF128's, so
-    // the same threshold parallelises earlier in absolute wall time.
-    let n_workers = (initial_pairs / PAR4_TARGET_PAIRS_PER_WORKER)
-        .max(2)
-        .min(pool_total);
+    let n_workers = par4_n_workers(initial_pairs, pool_total);
     let scope_rounds = par3_scope_rounds(initial_pairs, n_workers, n_rounds);
 
     if scope_rounds == 0 || n_workers <= 1 {

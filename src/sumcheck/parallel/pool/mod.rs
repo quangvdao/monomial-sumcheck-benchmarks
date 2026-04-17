@@ -1,71 +1,109 @@
-//! Process-global persistent worker pool with doorbell synchronization.
+//! Process-global persistent worker pool with per-worker doorbells.
 //!
-//! Each worker spins on a Release/Acquire epoch counter, runs the
-//! published task, and Release-bumps a `done` counter. The main thread
-//! (worker 0) publishes a task by storing a closure pointer into a
-//! cell, Release-incrementing the epoch, executing the task itself,
-//! then waiting on the `done` counter for the active extras.
+//! Each extra worker owns a private `WorkerSlot` (cache-line padded)
+//! containing its own `assigned_gen`, `done_gen`, and `task` cell.
+//! Main (worker 0) dispatches a task by writing the task pointer and
+//! bumping `assigned_gen` only on the active extras' slots, runs its
+//! own piece of the task, then waits for those extras' `done_gen` to
+//! catch up. Inactive extras never wake up: they keep spinning on
+//! their own `assigned_gen` and incur zero cost on the broadcasting
+//! thread.
 //!
-//! ### Why this exists
+//! ### Why per-worker slots
 //!
-//! Rayon and chili pay 1-3 µs per fork/join scope at small workloads,
-//! which is comparable to one full reduce-bind round of a small
-//! sumcheck. By pinning a fixed pool to P-cores (via QoS on macOS or
-//! `sched_setaffinity` on Linux) and using a pure-spin doorbell, we
-//! drop the per-broadcast cost to ~300 ns, making parallelism net-win
-//! at `n ≥ 12` on Apple M4. See `PARALLELISM.md` and
-//! `docs/notes/parallelism-design-discussion.md` for the full design.
+//! A previous design used a single shared `epoch + done` counter and
+//! a single shared `task` cell, with all extras polling the same
+//! epoch line. Two problems:
+//!
+//! 1. **Correctness race** with shared task: if some extras were
+//!    "inactive" (`worker_idx >= n_active`), they would still
+//!    consume the shared epoch but skip the task body. Because
+//!    `n_active` and `task` were `Relaxed` writes synchronized only
+//!    by the Release on `epoch`, a lagging inactive extra could
+//!    read `n_active` from one broadcast and `task` from a later
+//!    broadcast (Acquire forbids past-stale reads but not future-
+//!    torn reads), then run a closure whose captured environment
+//!    had already been dropped, panicking with
+//!    `index out of bounds: the len is 0 but the index is N`.
+//!
+//! 2. **Performance**: forcing inactive extras to ack every epoch
+//!    (a fix for #1) makes every broadcast pay for cache-line
+//!    ping-pong on the shared `done` counter across all extras,
+//!    even when only a few are active.
+//!
+//! Per-worker slots fix both: each extra writes only its own cache
+//! line, main reads only the active extras' lines, inactive extras
+//! never participate. Each broadcast at `n_active = k` costs roughly
+//! `k` cache-line round trips between main and the active extras.
 //!
 //! ### Lifetime safety of the broadcast closure
 //!
 //! [`PinnedPool::broadcast_scoped`] launders the caller-scoped closure
 //! into a `'static` reference via `transmute`. This is sound because
-//! the function blocks until every active worker has returned from
-//! the closure, so the closure outlives all worker accesses. The
-//! `n_active` field tells inactive workers to skip both the closure
-//! and the `done` counter, so they cannot keep a stale pointer alive.
+//! the function blocks until every active extra has stored its
+//! `done_gen >= new_gen`, which happens after that extra's call to
+//! the closure has fully returned. Inactive extras never read the
+//! closure pointer (they read only their own `assigned_gen`/`task`,
+//! and `task` is only written for active extras), so the closure
+//! pointer cannot dangle.
 
 mod platform;
 
 use std::cell::UnsafeCell;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
-
-/// Cache-line padding to keep hot atomics from false-sharing with each
-/// other. 128 bytes covers typical sector-prefetch pairs (two 64 B
-/// lines on most cores).
-#[repr(align(128))]
-struct CachePadded<T>(T);
 
 type TaskPtr = *const (dyn Fn(usize) + Sync + 'static);
 
-struct PoolShared {
-    /// Monotonically increasing epoch. Main Release-bumps it to publish
-    /// a new task; workers Acquire-spin waiting for `epoch > last_seen`.
-    epoch: CachePadded<AtomicU64>,
-    /// Count of extra (non-main) active workers that have finished the
-    /// current task. Only workers with `worker_idx < n_active` bump it.
-    done: CachePadded<AtomicUsize>,
-    /// Number of workers active for the current dispatch, including
-    /// main (always `1..=n_total`). Set by main BEFORE bumping epoch;
-    /// read by workers AFTER observing the epoch bump. Workers with
-    /// `worker_idx >= n_active` skip both `task` and `done` for this
-    /// dispatch (they just advance `last_epoch` and keep spinning).
-    n_active: AtomicUsize,
-    /// Shutdown flag set on drop.
-    shutdown: AtomicBool,
-    /// Scoped task pointer, published via the Release-bump on `epoch`.
-    /// `None` during startup/shutdown.
+/// Per-worker inbox: written by main, read by the worker. Padded so
+/// it doesn't false-share with the worker's outbox (`Outbox`), which
+/// avoids the cache-line ping-pong that would otherwise happen on
+/// every dispatch as ownership bounces between main and worker.
+#[repr(align(128))]
+struct WorkerInbox {
+    /// Generation of the most recently dispatched task for this
+    /// worker. Main Release-stores a fresh value to wake the worker;
+    /// the worker Acquire-spins on this and runs the task whenever it
+    /// observes a value greater than its `last_done`.
+    assigned_gen: AtomicU64,
+    /// Task pointer for this worker. Main writes it BEFORE
+    /// `assigned_gen`; worker reads it AFTER observing the new
+    /// `assigned_gen`. Release/Acquire on `assigned_gen` synchronizes
+    /// the publication.
     task: UnsafeCell<Option<TaskPtr>>,
 }
 
-// SAFETY: the only `!Send`/`!Sync` field is the
-// `UnsafeCell<Option<TaskPtr>>` raw pointer. Access to it is protected
-// by the epoch Release/Acquire pair and the done-counter broadcast
-// barrier; no worker touches the pointer outside a dispatch window.
-unsafe impl Send for PoolShared {}
-unsafe impl Sync for PoolShared {}
+/// Per-worker outbox: written by worker, read by main. Padded for the
+/// same reason as `WorkerInbox`.
+#[repr(align(128))]
+struct WorkerOutbox {
+    /// Generation of the most recently completed task. Worker
+    /// Release-stores `assigned_gen` here after the task returns; main
+    /// Acquire-spins on this to know the task is done.
+    done_gen: AtomicU64,
+}
+
+// SAFETY: the `UnsafeCell<Option<TaskPtr>>` is published via the
+// Release/Acquire pair on `assigned_gen`; main never overwrites it
+// while a worker is still running the previous task (because main
+// waits on `done_gen >= prev_gen` before publishing the next one).
+// The raw pointer inside is `Send + Sync` because the closure trait
+// object itself is `Sync` (and we never call it from a thread that
+// doesn't hold the dispatch_lock + observed assigned_gen).
+unsafe impl Sync for WorkerInbox {}
+unsafe impl Send for WorkerInbox {}
+
+struct PoolShared {
+    /// Per-extra inboxes. `len() == n_total - 1`. Each inbox is on
+    /// its own cache line.
+    inboxes: Vec<WorkerInbox>,
+    /// Per-extra outboxes. `len() == n_total - 1`. Each outbox is on
+    /// its own cache line.
+    outboxes: Vec<WorkerOutbox>,
+    /// Shutdown flag set on drop.
+    shutdown: AtomicBool,
+}
 
 /// A process-global pool of pinned worker threads.
 ///
@@ -78,6 +116,15 @@ pub struct PinnedPool {
     n_total: usize,
     shared: Arc<PoolShared>,
     workers: Vec<JoinHandle<()>>,
+    /// Monotonic dispatch-generation counter. Bumped on every
+    /// `broadcast_scoped` call (under the dispatch lock).
+    next_gen: AtomicU64,
+    /// Serializes concurrent callers of [`Self::broadcast_scoped`].
+    /// `broadcast_scoped` writes per-worker `task` and `assigned_gen`;
+    /// two callers from different threads would race those writes
+    /// against each other and against worker reads. The mutex makes
+    /// the API safe to call from anywhere.
+    dispatch_lock: Mutex<()>,
 }
 
 impl PinnedPool {
@@ -110,12 +157,21 @@ impl PinnedPool {
     }
 
     fn new(n_extra: usize) -> Self {
+        let inboxes: Vec<_> = (0..n_extra)
+            .map(|_| WorkerInbox {
+                assigned_gen: AtomicU64::new(0),
+                task: UnsafeCell::new(None),
+            })
+            .collect();
+        let outboxes: Vec<_> = (0..n_extra)
+            .map(|_| WorkerOutbox {
+                done_gen: AtomicU64::new(0),
+            })
+            .collect();
         let shared = Arc::new(PoolShared {
-            epoch: CachePadded(AtomicU64::new(0)),
-            done: CachePadded(AtomicUsize::new(0)),
-            n_active: AtomicUsize::new(0),
+            inboxes,
+            outboxes,
             shutdown: AtomicBool::new(false),
-            task: UnsafeCell::new(None),
         });
 
         let mut workers = Vec::with_capacity(n_extra);
@@ -132,14 +188,15 @@ impl PinnedPool {
             n_total: n_extra + 1,
             shared,
             workers,
+            next_gen: AtomicU64::new(0),
+            dispatch_lock: Mutex::new(()),
         }
     }
 
     /// Broadcast `f` to `n_active` workers: main (worker 0) plus
-    /// `n_active - 1` extras. Inactive extras skip `f` entirely and do
-    /// not touch the done counter, so the barrier contention cost
-    /// scales with `n_active` rather than the full pool size. Blocks
-    /// until every active worker has returned from `f`.
+    /// `n_active - 1` extras. Inactive extras keep spinning on their
+    /// own slot and pay zero broadcast overhead. Blocks until every
+    /// active extra has finished `f`.
     ///
     /// `n_active` must be in `1..=self.n_workers()`.
     pub fn broadcast_scoped(&self, n_active: usize, f: &(dyn Fn(usize) + Sync)) {
@@ -148,43 +205,46 @@ impl PinnedPool {
             "n_active={n_active} out of range 1..={}",
             self.n_total
         );
-        let n_extra_active = n_active - 1;
 
-        // Reset the done counter. Safe because the previous broadcast
-        // blocked until done reached its target; workers Release-bumped
-        // strictly after finishing `task()`.
-        self.shared.done.0.store(0, Ordering::Relaxed);
-
-        if n_extra_active == 0 && self.n_total == 1 {
-            // No extras at all: just run on main.
+        if n_active == 1 {
             f(0);
             return;
         }
 
-        // Publish n_active before the task pointer; both are
-        // synchronized via the Release-bump on `epoch` below.
-        self.shared.n_active.store(n_active, Ordering::Relaxed);
+        // Serialize concurrent callers; per-worker `task` and
+        // `assigned_gen` writes from different threads would race.
+        let _guard = self.dispatch_lock.lock().expect("dispatch_lock poisoned");
+
+        let n_extra_active = n_active - 1;
+        let new_gen = self.next_gen.fetch_add(1, Ordering::Relaxed) + 1;
 
         // Launder the scoped lifetime. SAFETY: we block until every
-        // active worker finishes `task()`, so `f` outlives all
-        // accesses.
+        // active extra finishes `f`, so the closure outlives all
+        // worker accesses. Inactive extras never see the closure
+        // pointer (they don't read `task`).
         let f_static: &(dyn Fn(usize) + Sync + 'static) = unsafe {
             std::mem::transmute::<&(dyn Fn(usize) + Sync), &(dyn Fn(usize) + Sync + 'static)>(f)
         };
-        unsafe {
-            *self.shared.task.get() = Some(f_static as TaskPtr);
-        }
+        let task_ptr = f_static as TaskPtr;
 
-        // Release-bump the epoch. Publishes the writes above to any
-        // worker that subsequently Acquire-loads the epoch.
-        self.shared.epoch.0.fetch_add(1, Ordering::Release);
+        // Publish task to each active extra, then bump its
+        // assigned_gen. Release-store on assigned_gen synchronizes
+        // the prior task write.
+        for inbox in self.shared.inboxes[..n_extra_active].iter() {
+            unsafe {
+                *inbox.task.get() = Some(task_ptr);
+            }
+            inbox.assigned_gen.store(new_gen, Ordering::Release);
+        }
 
         // Main runs as worker 0.
         f(0);
 
-        // Wait for active extra workers to Release-bump `done`.
-        if n_extra_active > 0 {
-            spin_until_ge(&self.shared.done.0, n_extra_active);
+        // Wait for active extras to ack via `done_gen >= new_gen`.
+        // Each outbox is on its own cache line, so this scan reads
+        // cold lines but never contends with main's inbox writes.
+        for outbox in self.shared.outboxes[..n_extra_active].iter() {
+            spin_until_ge_u64(&outbox.done_gen, new_gen);
         }
     }
 }
@@ -192,9 +252,8 @@ impl PinnedPool {
 impl Drop for PinnedPool {
     fn drop(&mut self) {
         self.shared.shutdown.store(true, Ordering::Release);
-        // Wake spinners. They'll observe `shutdown` after Acquire-loading
-        // the bumped epoch and return.
-        self.shared.epoch.0.fetch_add(1, Ordering::Release);
+        // Wake spinners. They poll `shutdown` between iterations so
+        // they'll observe it and return on their own.
         for handle in self.workers.drain(..) {
             let _ = handle.join();
         }
@@ -204,54 +263,49 @@ impl Drop for PinnedPool {
 fn pinned_worker_loop(shared: Arc<PoolShared>, worker_idx: usize) {
     platform::pin_current_worker(worker_idx);
 
-    let mut last_epoch: u64 = 0;
+    let inbox = &shared.inboxes[worker_idx - 1];
+    let outbox = &shared.outboxes[worker_idx - 1];
+    let mut last_done: u64 = 0;
     loop {
-        // Spin-wait for a new epoch or shutdown. With `pin_current_worker`
-        // applied, the OS keeps us on a fast core so pure `spin_loop`
-        // is safe. Shutdown is checked on every iteration.
-        let new_epoch = loop {
+        // Spin-wait for a new generation or shutdown. With
+        // `pin_current_worker` applied the OS keeps us on a fast core
+        // so a pure spin is acceptable.
+        loop {
             if shared.shutdown.load(Ordering::Acquire) {
                 return;
             }
-            let e = shared.epoch.0.load(Ordering::Acquire);
-            if e > last_epoch {
-                break e;
+            let g = inbox.assigned_gen.load(Ordering::Acquire);
+            if g > last_done {
+                last_done = g;
+                break;
             }
             std::hint::spin_loop();
-        };
-        last_epoch = new_epoch;
-
-        if shared.shutdown.load(Ordering::Acquire) {
-            return;
         }
 
-        // Synchronized with the Release on `epoch`: n_active and task
-        // are both visible. If this worker is inactive for the current
-        // dispatch, skip cleanly without touching `done`.
-        let n_active = shared.n_active.load(Ordering::Relaxed);
-        if worker_idx >= n_active {
-            continue;
-        }
-
-        let task_opt: Option<TaskPtr> = unsafe { *shared.task.get() };
+        // Synchronized with main's Release on `assigned_gen`: the
+        // task pointer write is visible. SAFETY: main waits for
+        // `done_gen >= last_done` before overwriting `task`, so the
+        // pointer is valid for the entire duration of `task(worker_idx)`.
+        let task_opt: Option<TaskPtr> = unsafe { *inbox.task.get() };
         if let Some(task_ptr) = task_opt {
             let task: &(dyn Fn(usize) + Sync + 'static) = unsafe { &*task_ptr };
             task(worker_idx);
         }
 
-        // Release-signal completion.
-        shared.done.0.fetch_add(1, Ordering::Release);
+        // Release-store `done_gen = last_done` so main's Acquire-load
+        // sees the task as fully complete (incl. all task-side stores).
+        outbox.done_gen.store(last_done, Ordering::Release);
     }
 }
 
 /// Bounded spin then `yield_now` fallback. Used by `broadcast_scoped`
-/// to wait on the `done` counter, where the calling thread is whatever
-/// thread invoked the broadcast (not necessarily a pinned worker), so
-/// pure spinning could starve other tasks if the OS preempts us
-/// mid-spin. The 2048-iteration budget corresponds to roughly 1 µs of
-/// spinning on a 3-4 GHz core before the first yield.
+/// to wait on per-extra `done_gen` counters, where the calling thread
+/// is whatever thread invoked the broadcast (not necessarily a pinned
+/// worker), so pure spinning could starve other tasks if the OS
+/// preempts us mid-spin. The 2048-iteration budget corresponds to
+/// roughly 1 µs of spinning on a 3-4 GHz core before the first yield.
 #[inline]
-fn spin_until_ge(counter: &AtomicUsize, target: usize) {
+fn spin_until_ge_u64(counter: &AtomicU64, target: u64) {
     const SPIN_BUDGET: u32 = 2048;
     let mut spins = 0u32;
     loop {
