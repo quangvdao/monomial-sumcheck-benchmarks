@@ -127,6 +127,47 @@ impl BN254Accum {
     }
 }
 
+pub trait Bn254UpperLimbMul {
+    fn mul_by_hi_2limbs(self, limb_lo: u64, limb_hi: u64) -> Self;
+}
+
+#[inline(always)]
+fn bn254_sparse_montgomery_step(r: &mut [u64; 4], a: [u64; 4], limb: u64) {
+    let mut carry1 = 0u64;
+    r[0] = mac_carry(r[0], a[0], limb, &mut carry1);
+
+    let k = r[0].wrapping_mul(BN254_INV);
+    let mut carry2 = 0u64;
+    let _ = mac_carry(r[0], k, BN254_MODULUS[0], &mut carry2);
+
+    let new_r1 = mac_carry(r[1], a[1], limb, &mut carry1);
+    r[0] = mac_carry(new_r1, k, BN254_MODULUS[1], &mut carry2);
+    r[1] = new_r1;
+
+    let new_r2 = mac_carry(r[2], a[2], limb, &mut carry1);
+    r[1] = mac_carry(new_r2, k, BN254_MODULUS[2], &mut carry2);
+    r[2] = new_r2;
+
+    let new_r3 = mac_carry(r[3], a[3], limb, &mut carry1);
+    r[2] = mac_carry(new_r3, k, BN254_MODULUS[3], &mut carry2);
+    r[3] = carry1.wrapping_add(carry2);
+}
+
+impl Bn254UpperLimbMul for BN254Fr {
+    #[inline(always)]
+    fn mul_by_hi_2limbs(self, limb_lo: u64, limb_hi: u64) -> Self {
+        let a = bn254_to_limbs(self);
+        let mut r = [0u64; 4];
+        bn254_sparse_montgomery_step(&mut r, a, limb_lo);
+        bn254_sparse_montgomery_step(&mut r, a, limb_hi);
+
+        if cmp4(r, BN254_MODULUS) != std::cmp::Ordering::Less {
+            r = sub4(r, BN254_MODULUS);
+        }
+        bn254_from_limbs(r)
+    }
+}
+
 pub fn sumcheck_deg2_delayed_bn254(
     f: &mut Vec<BN254Fr>,
     g: &mut Vec<BN254Fr>,
@@ -636,5 +677,35 @@ pub fn sumcheck_deg2_eq_projective_delayed_bn254_upper(
         }
         f.truncate(half);
         g.truncate(half);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn upper_limb_mul_matches_full_multiplication() {
+        let xs = [
+            BN254Fr::from(0u64),
+            BN254Fr::from(1u64),
+            BN254Fr::from(2u64),
+            BN254Fr::from(u64::MAX),
+            BN254Fr::from(0x1234_5678_9abc_def0u64),
+        ];
+        let limbs = [
+            (0u64, 0u64),
+            (1u64, 0u64),
+            (0u64, 1u64),
+            (0xabcdef01_23456789u64, 0x01234567_89abcdefu64),
+            (u64::MAX, (1u64 << 61) - 1),
+        ];
+
+        for x in xs {
+            for (lo, hi) in limbs {
+                let challenge = BN254Fr::new_unchecked(ark_ff::BigInt([0, 0, lo, hi]));
+                assert_eq!(x.mul_by_hi_2limbs(lo, hi), x * challenge);
+            }
+        }
     }
 }

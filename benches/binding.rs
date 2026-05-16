@@ -2,6 +2,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 use ark_bn254::Fr as BN254Fr;
 use ark_ff::AdditiveGroup;
+use monomial_sumcheck_benchmarks::sumcheck::Bn254UpperLimbMul;
 
 const N: usize = 1 << 20;
 
