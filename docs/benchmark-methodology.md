@@ -57,12 +57,13 @@ For a degree-2 BN254 comparison at n=20, run:
       --label bn254-deg2-n20
 
 The collector writes a machine manifest, per-repetition command order, command
-output, Criterion estimates, and Criterion samples. It does not overwrite an
-existing run. A raw `--filter` remains available for exploratory measurements,
-but headline comparisons use repeated exact `--case` arguments so variants do
-not share one Criterion process. The collector refuses a dirty source tree by
-default. `--allow-dirty` is reserved for smoke tests, and such a run is not
-eligible for `artifacts/data`.
+output, system-load snapshots, Criterion estimates, and Criterion samples. It
+does not overwrite an existing run. A raw `--filter` remains available for
+exploratory measurements, but headline comparisons use repeated exact `--case`
+arguments so variants do not share one Criterion process. The collector
+refuses a dirty source tree or a one-minute load average above 0.25 per logical
+CPU by default. `--allow-dirty` and `--allow-busy` are reserved for smoke tests,
+and such a run is not eligible for `artifacts/data`.
 
 ## Statistical summary
 
@@ -99,10 +100,11 @@ summary. Do not transcribe table entries manually.
 ## Machine state
 
 The manifest records the Git commit, dirty status, Rust and LLVM versions,
-target triple, operating-system build, CPU, benchmark command, and relevant
-compiler flags. Record the machine's power mode and whether it was connected
-to power in the accepted dataset's README because those settings are not
-available through a portable command.
+target triple, operating-system build, CPU, initial system load, benchmark
+commands, and relevant compiler flags. Each repetition additionally records
+load snapshots before and after every case. Record the machine's power mode and
+whether it was connected to power in the accepted dataset's README because
+those settings are not available through a portable command.
 
 Run one collector at a time. Stop unrelated CPU-intensive work and keep the
 machine on AC power. If thermal throttling or an interrupted process is

@@ -31,7 +31,22 @@ def capture(command: list[str]) -> str:
     return result.stdout.strip()
 
 
-def machine_manifest(commands: list[list[str]], repetitions: int) -> dict[str, object]:
+def load_snapshot() -> dict[str, object]:
+    load1, load5, load15 = os.getloadavg()
+    logical_cpus = os.cpu_count() or 1
+    return {
+        "captured_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "load_average_1m": load1,
+        "load_average_5m": load5,
+        "load_average_15m": load15,
+        "logical_cpus": logical_cpus,
+        "load_1m_per_logical_cpu": load1 / logical_cpus,
+    }
+
+
+def machine_manifest(
+    commands: list[list[str]], repetitions: int, initial_load: dict[str, object]
+) -> dict[str, object]:
     cpu = ""
     if platform.system() == "Darwin":
         cpu = capture(["sysctl", "-n", "machdep.cpu.brand_string"])
@@ -44,6 +59,7 @@ def machine_manifest(commands: list[list[str]], repetitions: int) -> dict[str, o
         "commands": commands,
         "repetitions": repetitions,
         "pairing": "one fresh cargo process per case; cyclically balanced case order",
+        "initial_load": initial_load,
         "git_commit": capture(["git", "rev-parse", "HEAD"]),
         "git_status": capture(["git", "status", "--short"]),
         "rustc": capture(["rustc", "-vV"]),
@@ -96,6 +112,17 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="allow an uncommitted source tree (for smoke tests only)",
     )
+    parser.add_argument(
+        "--max-load-per-cpu",
+        type=float,
+        default=0.25,
+        help="maximum one-minute load average per logical CPU (default: 0.25)",
+    )
+    parser.add_argument(
+        "--allow-busy",
+        action="store_true",
+        help="run above the load threshold (for smoke tests only)",
+    )
     return parser.parse_args()
 
 
@@ -103,11 +130,24 @@ def main() -> int:
     args = parse_args()
     if args.repetitions < 1:
         raise SystemExit("--repetitions must be positive")
+    if args.max_load_per_cpu <= 0:
+        raise SystemExit("--max-load-per-cpu must be positive")
     dirty_status = capture(["git", "status", "--short"])
     if dirty_status and not args.allow_dirty:
         raise SystemExit(
             "refusing to collect paper data from a dirty tree; commit the benchmark "
             "revision or pass --allow-dirty for a non-publishable smoke test"
+        )
+    initial_load = load_snapshot()
+    if (
+        float(initial_load["load_1m_per_logical_cpu"]) > args.max_load_per_cpu
+        and not args.allow_busy
+    ):
+        raise SystemExit(
+            "refusing to collect paper data on a busy host: one-minute load per "
+            f"logical CPU is {initial_load['load_1m_per_logical_cpu']:.2f}, above "
+            f"the {args.max_load_per_cpu:.2f} threshold; wait for the host to become "
+            "idle or pass --allow-busy for a non-publishable smoke test"
         )
 
     timestamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -126,7 +166,8 @@ def main() -> int:
         for criterion_filter in filters
     ]
     (output / "manifest.json").write_text(
-        json.dumps(machine_manifest(commands, args.repetitions), indent=2) + "\n"
+        json.dumps(machine_manifest(commands, args.repetitions, initial_load), indent=2)
+        + "\n"
     )
 
     target_dir = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target"))
@@ -144,7 +185,28 @@ def main() -> int:
         )
 
         copied: list[str] = []
+        load_records: list[dict[str, object]] = []
         for case_index, command in enumerate(ordered_commands, start=1):
+            before_load = load_snapshot()
+            if (
+                float(before_load["load_1m_per_logical_cpu"])
+                > args.max_load_per_cpu
+                and not args.allow_busy
+            ):
+                (run_dir / "FAILED").write_text(
+                    "host load exceeded the configured threshold before "
+                    f"case {case_index}\n"
+                )
+                (run_dir / "system-load.json").write_text(
+                    json.dumps(load_records + [{"before": before_load}], indent=2)
+                    + "\n"
+                )
+                print(
+                    f"host became busy before repetition {index}, case {case_index}; "
+                    f"see {run_dir}",
+                    file=sys.stderr,
+                )
+                return 3
             started_ns = time.time_ns()
             print(
                 f"[{index}/{args.repetitions}, case {case_index}/{len(ordered_commands)}] "
@@ -158,6 +220,18 @@ def main() -> int:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
+            )
+            after_load = load_snapshot()
+            load_records.append(
+                {
+                    "case_index": case_index,
+                    "command": command,
+                    "before": before_load,
+                    "after": after_load,
+                }
+            )
+            (run_dir / "system-load.json").write_text(
+                json.dumps(load_records, indent=2) + "\n"
             )
             log_name = (
                 "cargo-bench.log"

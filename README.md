@@ -50,6 +50,7 @@ Rust toolchain: `1.94.0` (pinned in `rust-toolchain.toml`).
 - Every suite uses the same five-second warm-up, ten-second measurement window, 100 samples, and 99% Criterion confidence level.
 - The combined binding benchmark (`bench_combined` in `binding.rs`) follows Jolt's `bound_poly_var_top` layout: in-place binding on a contiguous 2N-element array. Criterion prepares the working buffer outside the timed routine, so no separately measured copy time is subtracted.
 - Headline results require at least 20 outer repetitions, with each compared case run in its own fresh process. The repository reports 99% bootstrap intervals and empirical p01/p99 process-level quantiles, with speedups paired by outer repetition.
+- The collector records system-load snapshots and refuses paper-data collection when the one-minute load average exceeds 0.25 per logical CPU. `--allow-busy` is for non-publishable smoke tests only.
 - Some hot kernels in `src/sumcheck/` intentionally keep non-obvious source ordering, helper splitting, or duplicate reloads because those shapes produce measurably better LLVM codegen on the M4/NEON target. `benches/sumcheck.rs` is intentionally kept as thin wiring around those kernels. Re-benchmark those paths before simplifying them for style.
 
 See [docs/benchmark-methodology.md](docs/benchmark-methodology.md) for the measurement boundary, collection protocol, statistical procedure, and artifact-acceptance rules.
