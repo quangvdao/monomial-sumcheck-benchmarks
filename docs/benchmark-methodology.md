@@ -26,18 +26,24 @@ Every suite uses the shared configuration in src/lib.rs:
 - 100 Criterion samples; and
 - 99% Criterion confidence level.
 
-The sum-check and combined-binding suites randomize variant registration within
-each process. This limits order and thermal bias when related variants run in
-the same process.
+The benchmark suites may randomize variant registration, but accepted paired
+data do not depend on shared-process ordering: the collector selects one exact
+case per Cargo process.
 
 ## Independent repetitions
 
-Headline claims use at least 20 independent benchmark processes. Collect them
-with:
+Headline claims use at least 20 independent outer repetitions. Each compared
+case runs as the only selected benchmark in a fresh Cargo process. The
+collector pairs cases by outer repetition and cyclically balances their order,
+so no variant systematically inherits the first-benchmark penalty. Collect a
+four-way binding comparison with:
 
     python3 scripts/collect.py \
       --suite binding \
-      --filter combined \
+      --case BN254/combined_boolean_full \
+      --case BN254/combined_projective_full \
+      --case BN254/combined_boolean_upper \
+      --case BN254/combined_projective_upper \
       --repetitions 20 \
       --label combined
 
@@ -45,14 +51,18 @@ For a degree-2 BN254 comparison at n=20, run:
 
     python3 scripts/collect.py \
       --suite sumcheck \
-      --filter 'sumcheck_deg2/BN254/(delayed|proj_delayed)/20' \
+      --case sumcheck_deg2/BN254/delayed/20 \
+      --case sumcheck_deg2/BN254/proj_delayed/20 \
       --repetitions 20 \
       --label bn254-deg2-n20
 
-The collector writes a machine manifest, command output, Criterion estimates,
-and Criterion samples for each process. It does not overwrite an existing run.
-It refuses a dirty source tree by default. `--allow-dirty` is reserved for
-smoke tests, and such a run is not eligible for `artifacts/data`.
+The collector writes a machine manifest, per-repetition command order, command
+output, Criterion estimates, and Criterion samples. It does not overwrite an
+existing run. A raw `--filter` remains available for exploratory measurements,
+but headline comparisons use repeated exact `--case` arguments so variants do
+not share one Criterion process. The collector refuses a dirty source tree by
+default. `--allow-dirty` is reserved for smoke tests, and such a run is not
+eligible for `artifacts/data`.
 
 ## Statistical summary
 
@@ -65,8 +75,9 @@ For each benchmark, report:
   statistics, not high-confidence tail-latency estimates); and
 - the number of independent processes.
 
-Compute speedups from paired observations collected in the same process. Do
-not divide confidence-interval endpoints from two unpaired measurements.
+Compute speedups within each outer repetition, pairing the fresh-process
+observations for the baseline and optimized case. Do not divide
+confidence-interval endpoints from two unpaired measurements.
 
 For the combined binding run, first inspect the benchmark identifiers:
 

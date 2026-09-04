@@ -8,6 +8,7 @@ import datetime as dt
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -30,7 +31,7 @@ def capture(command: list[str]) -> str:
     return result.stdout.strip()
 
 
-def machine_manifest(command: list[str], repetitions: int) -> dict[str, object]:
+def machine_manifest(commands: list[list[str]], repetitions: int) -> dict[str, object]:
     cpu = ""
     if platform.system() == "Darwin":
         cpu = capture(["sysctl", "-n", "machdep.cpu.brand_string"])
@@ -38,10 +39,11 @@ def machine_manifest(command: list[str], repetitions: int) -> dict[str, object]:
         cpu = capture(["lscpu"])
 
     return {
-        "schema": 1,
+        "schema": 2,
         "created_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "command": command,
+        "commands": commands,
         "repetitions": repetitions,
+        "pairing": "one fresh cargo process per case; cyclically balanced case order",
         "git_commit": capture(["git", "rev-parse", "HEAD"]),
         "git_status": capture(["git", "status", "--short"]),
         "rustc": capture(["rustc", "-vV"]),
@@ -73,10 +75,19 @@ def copy_fresh_criterion_results(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run one Criterion suite in independent processes and preserve raw samples."
+        description="Run Criterion cases in independent processes and preserve raw samples."
     )
     parser.add_argument("--suite", required=True, choices=["field_ops", "binding", "lookup_tables", "sumcheck"])
-    parser.add_argument("--filter", required=True, help="Criterion benchmark filter or regular expression")
+    selection = parser.add_mutually_exclusive_group(required=True)
+    selection.add_argument(
+        "--filter",
+        help="Criterion filter or regular expression for an exploratory single-process run",
+    )
+    selection.add_argument(
+        "--case",
+        action="append",
+        help="exact Criterion benchmark ID; repeat to collect paired cases in separate processes",
+    )
     parser.add_argument("--repetitions", type=int, default=20)
     parser.add_argument("--label", required=True, help="Short output-directory label")
     parser.add_argument("--output-root", type=Path, default=ROOT / "artifacts" / "runs")
@@ -103,17 +114,19 @@ def main() -> int:
     output = args.output_root / f"{timestamp}-{args.label}"
     output.mkdir(parents=True, exist_ok=False)
 
-    command = [
-        "cargo",
-        "bench",
-        "--bench",
-        args.suite,
-        "--",
-        args.filter,
-        "--noplot",
+    if args.case:
+        if len(set(args.case)) != len(args.case):
+            raise SystemExit("--case values must be unique")
+        filters = [f"^{re.escape(case)}$" for case in args.case]
+    else:
+        filters = [args.filter]
+
+    commands = [
+        ["cargo", "bench", "--bench", args.suite, "--", criterion_filter, "--noplot"]
+        for criterion_filter in filters
     ]
     (output / "manifest.json").write_text(
-        json.dumps(machine_manifest(command, args.repetitions), indent=2) + "\n"
+        json.dumps(machine_manifest(commands, args.repetitions), indent=2) + "\n"
     )
 
     target_dir = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target"))
@@ -124,31 +137,57 @@ def main() -> int:
     for index in range(1, args.repetitions + 1):
         run_dir = output / f"run-{index:02d}"
         run_dir.mkdir()
-        started_ns = time.time_ns()
-        print(f"[{index}/{args.repetitions}] {' '.join(command)}", flush=True)
-        result = subprocess.run(
-            command,
-            cwd=ROOT,
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
+        offset = (index - 1) % len(commands)
+        ordered_commands = commands[offset:] + commands[:offset]
+        (run_dir / "command-order.json").write_text(
+            json.dumps(ordered_commands, indent=2) + "\n"
         )
-        (run_dir / "cargo-bench.log").write_text(result.stdout)
-        if result.returncode != 0:
-            (run_dir / "FAILED").write_text(f"exit code {result.returncode}\n")
-            print(f"benchmark process {index} failed; see {run_dir}", file=sys.stderr)
-            return result.returncode
 
-        copied = copy_fresh_criterion_results(criterion_root, run_dir, started_ns)
-        (run_dir / "benchmarks.json").write_text(json.dumps(copied, indent=2) + "\n")
-        if not copied:
+        copied: list[str] = []
+        for case_index, command in enumerate(ordered_commands, start=1):
+            started_ns = time.time_ns()
             print(
-                f"no fresh Criterion estimates found after process {index}; "
-                f"check the filter and {run_dir / 'cargo-bench.log'}",
-                file=sys.stderr,
+                f"[{index}/{args.repetitions}, case {case_index}/{len(ordered_commands)}] "
+                f"{' '.join(command)}",
+                flush=True,
             )
-            return 2
+            result = subprocess.run(
+                command,
+                cwd=ROOT,
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            log_name = (
+                "cargo-bench.log"
+                if len(ordered_commands) == 1
+                else f"cargo-bench-{case_index:02d}.log"
+            )
+            (run_dir / log_name).write_text(result.stdout)
+            if result.returncode != 0:
+                (run_dir / "FAILED").write_text(
+                    f"case {case_index} exit code {result.returncode}\n"
+                )
+                print(
+                    f"benchmark repetition {index}, case {case_index} failed; see {run_dir}",
+                    file=sys.stderr,
+                )
+                return result.returncode
+
+            fresh = copy_fresh_criterion_results(criterion_root, run_dir, started_ns)
+            if not fresh:
+                print(
+                    f"no fresh Criterion estimates found after repetition {index}, "
+                    f"case {case_index}; check {run_dir / log_name}",
+                    file=sys.stderr,
+                )
+                return 2
+            copied.extend(fresh)
+
+        (run_dir / "benchmarks.json").write_text(
+            json.dumps(sorted(set(copied)), indent=2) + "\n"
+        )
 
     print(output)
     return 0
