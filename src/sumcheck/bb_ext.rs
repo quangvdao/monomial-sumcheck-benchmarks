@@ -99,8 +99,20 @@ impl BB5Accum {
     pub(crate) fn fmadd(&mut self, a: BB5, b: BB5) {
         let a = bb5_to_limbs(a);
         let b = bb5_to_limbs(b);
-        let (a0, a1, a2, a3, a4) = (a[0] as u64, a[1] as u64, a[2] as u64, a[3] as u64, a[4] as u64);
-        let (b0, b1, b2, b3, b4) = (b[0] as u64, b[1] as u64, b[2] as u64, b[3] as u64, b[4] as u64);
+        let (a0, a1, a2, a3, a4) = (
+            a[0] as u64,
+            a[1] as u64,
+            a[2] as u64,
+            a[3] as u64,
+            a[4] as u64,
+        );
+        let (b0, b1, b2, b3, b4) = (
+            b[0] as u64,
+            b[1] as u64,
+            b[2] as u64,
+            b[3] as u64,
+            b[4] as u64,
+        );
 
         self.c[0] += (a0 * b0) as u128;
         self.c[1] += (a0 * b1 + a1 * b0) as u128;
@@ -292,7 +304,8 @@ impl BB5MulByConst {
                 hi = vmlal_lane_u32::<0>(hi, self.rhs_hi[4], x4);
                 let dot: [u32; 4] = std::mem::transmute(bb_neon_monty_reduce(lo, hi));
                 let x_coeffs = bb5_to_coeffs(x);
-                let tail: u32 = std::mem::transmute(BabyBear::dot_product::<5>(&x_coeffs, &self.tail));
+                let tail: u32 =
+                    std::mem::transmute(BabyBear::dot_product::<5>(&x_coeffs, &self.tail));
                 bb5_from_limbs([dot[0], dot[1], dot[2], dot[3], tail])
             }
         }
@@ -344,8 +357,20 @@ impl KB5Accum {
     fn fmadd(&mut self, a: KB5, b: KB5) {
         let a = kb5_to_limbs(a);
         let b = kb5_to_limbs(b);
-        let (a0, a1, a2, a3, a4) = (a[0] as u64, a[1] as u64, a[2] as u64, a[3] as u64, a[4] as u64);
-        let (b0, b1, b2, b3, b4) = (b[0] as u64, b[1] as u64, b[2] as u64, b[3] as u64, b[4] as u64);
+        let (a0, a1, a2, a3, a4) = (
+            a[0] as u64,
+            a[1] as u64,
+            a[2] as u64,
+            a[3] as u64,
+            a[4] as u64,
+        );
+        let (b0, b1, b2, b3, b4) = (
+            b[0] as u64,
+            b[1] as u64,
+            b[2] as u64,
+            b[3] as u64,
+            b[4] as u64,
+        );
 
         self.c[0] += (a0 * b0) as u128;
         self.c[1] += (a0 * b1 + a1 * b0) as u128;
@@ -399,7 +424,9 @@ impl KB5MulByConst {
                 unsafe { std::mem::transmute([b[4], b[0], b1_minus_b4, b[2]]) },
                 unsafe { std::mem::transmute([b[3], b[4], b0_minus_b3, b1_minus_b4]) },
                 unsafe { std::mem::transmute([b[2], b[3], b4_minus_b2, b0_minus_b3]) },
-                unsafe { std::mem::transmute([b1_minus_b4, b[2], b3_plus_b4_minus_b1, b4_minus_b2]) },
+                unsafe {
+                    std::mem::transmute([b1_minus_b4, b[2], b3_plus_b4_minus_b1, b4_minus_b2])
+                },
             ];
             let tail = [b[4], b[3], b[2], b1_minus_b4, b0_minus_b3];
             Self { rhs, tail }

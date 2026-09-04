@@ -1,8 +1,9 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
+use rand::seq::SliceRandom;
 
 use ark_bn254::Fr as BN254Fr;
 use ark_ff::AdditiveGroup;
-use monomial_sumcheck_benchmarks::sumcheck::Bn254UpperLimbMul;
+use monomial_sumcheck_benchmarks::{benchmark_config, sumcheck::Bn254UpperLimbMul};
 
 const N: usize = 1 << 20;
 
@@ -55,24 +56,14 @@ fn bench_binding_full_loop(c: &mut Criterion) {
 
     c.bench_function("BN254/bind_boolean_full", |b| {
         b.iter(|| {
-            bind_boolean_loop(
-                black_box(&p0),
-                black_box(&p1),
-                black_box(r),
-                &mut out,
-            );
+            bind_boolean_loop(black_box(&p0), black_box(&p1), black_box(r), &mut out);
             black_box(&out);
         })
     });
 
     c.bench_function("BN254/bind_projective_full", |b| {
         b.iter(|| {
-            bind_projective_loop(
-                black_box(&p0),
-                black_box(&p_inf),
-                black_box(r),
-                &mut out,
-            );
+            bind_projective_loop(black_box(&p0), black_box(&p_inf), black_box(r), &mut out);
             black_box(&out);
         })
     });
@@ -188,76 +179,85 @@ fn bench_upper_limb_binding(c: &mut Criterion) {
 // Faithful to Jolt's DensePolynomial::bound_poly_var_top: in-place binding
 // on a single interleaved array Z, where left = Z[..N], right = Z[N..].
 //
-// Each iteration restores the working buffer via memcpy (same overhead for
-// all three variants, keeps data warm in cache as it would be in a real
-// prover after the preceding evaluation pass).
+// Criterion prepares a fresh working buffer outside the timed routine. This
+// avoids subtracting a separately measured memcpy point estimate.
 // ---------------------------------------------------------------------------
 
 fn bench_combined(c: &mut Criterion) {
     let template = make_bn254(2 * N);
     let r_full = BN254Fr::from(0x123456789abcdef0u64);
     let (_, lo, hi) = make_upper_limb_challenge();
-    let mut work = template.clone();
+    let mut order = [0usize, 1, 2, 3];
+    order.shuffle(&mut rand::thread_rng());
 
-    c.bench_function("BN254/combined_memcpy", |b| {
-        b.iter(|| {
-            work.copy_from_slice(&template);
-            black_box(work[0]);
-        })
-    });
-
-    c.bench_function("BN254/combined_baseline", |b| {
-        b.iter(|| {
-            work.copy_from_slice(&template);
-            let (left, right) = work.split_at_mut(N);
-            for (a, b_val) in left.iter_mut().zip(right.iter()) {
-                *a += r_full * (*b_val - *a);
-            }
-            black_box(left[0]);
-        })
-    });
-
-    c.bench_function("BN254/combined_boolean_upper", |b| {
-        b.iter(|| {
-            work.copy_from_slice(&template);
-            let (left, right) = work.split_at_mut(N);
-            for (a, b_val) in left.iter_mut().zip(right.iter()) {
-                let diff = *b_val - *a;
-                *a += diff.mul_by_hi_2limbs(lo, hi);
-            }
-            black_box(left[0]);
-        })
-    });
-
-    c.bench_function("BN254/combined_projective_full", |b| {
-        b.iter(|| {
-            work.copy_from_slice(&template);
-            let (left, right) = work.split_at_mut(N);
-            for (a, b_val) in left.iter_mut().zip(right.iter()) {
-                *a += r_full * *b_val;
-            }
-            black_box(left[0]);
-        })
-    });
-
-    c.bench_function("BN254/combined_optimized", |b| {
-        b.iter(|| {
-            work.copy_from_slice(&template);
-            let (left, right) = work.split_at_mut(N);
-            for (a, b_val) in left.iter_mut().zip(right.iter()) {
-                *a += b_val.mul_by_hi_2limbs(lo, hi);
-            }
-            black_box(left[0]);
-        })
-    });
+    for variant in order {
+        match variant {
+            0 => c.bench_function("BN254/combined_boolean_full", |b| {
+                b.iter_batched(
+                    || template.clone(),
+                    |mut work| {
+                        let (left, right) = work.split_at_mut(N);
+                        for (a, b_val) in left.iter_mut().zip(right.iter()) {
+                            *a += r_full * (*b_val - *a);
+                        }
+                        black_box(left[0]);
+                    },
+                    BatchSize::LargeInput,
+                )
+            }),
+            1 => c.bench_function("BN254/combined_boolean_upper", |b| {
+                b.iter_batched(
+                    || template.clone(),
+                    |mut work| {
+                        let (left, right) = work.split_at_mut(N);
+                        for (a, b_val) in left.iter_mut().zip(right.iter()) {
+                            let diff = *b_val - *a;
+                            *a += diff.mul_by_hi_2limbs(lo, hi);
+                        }
+                        black_box(left[0]);
+                    },
+                    BatchSize::LargeInput,
+                )
+            }),
+            2 => c.bench_function("BN254/combined_projective_full", |b| {
+                b.iter_batched(
+                    || template.clone(),
+                    |mut work| {
+                        let (left, right) = work.split_at_mut(N);
+                        for (a, b_val) in left.iter_mut().zip(right.iter()) {
+                            *a += r_full * *b_val;
+                        }
+                        black_box(left[0]);
+                    },
+                    BatchSize::LargeInput,
+                )
+            }),
+            3 => c.bench_function("BN254/combined_projective_upper", |b| {
+                b.iter_batched(
+                    || template.clone(),
+                    |mut work| {
+                        let (left, right) = work.split_at_mut(N);
+                        for (a, b_val) in left.iter_mut().zip(right.iter()) {
+                            *a += b_val.mul_by_hi_2limbs(lo, hi);
+                        }
+                        black_box(left[0]);
+                    },
+                    BatchSize::LargeInput,
+                )
+            }),
+            _ => unreachable!(),
+        };
+    }
 }
 
-criterion_group!(
-    benches,
-    bench_binding_full_loop,
-    bench_binding_latency,
-    bench_upper_limb_mul,
-    bench_upper_limb_binding,
-    bench_combined
-);
+criterion_group! {
+    name = benches;
+    config = benchmark_config();
+    targets =
+        bench_binding_full_loop,
+        bench_binding_latency,
+        bench_upper_limb_mul,
+        bench_upper_limb_binding,
+        bench_combined
+}
 criterion_main!(benches);

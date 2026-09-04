@@ -23,7 +23,7 @@ fn bb5_projective_eval_matches_reference() {
     let f = make_bb5(1usize << n);
     let g = make_bb5(1usize << n);
     let eq_point = make_bb5(n);
-    let suffix_eq = build_suffix_eq_tables(&eq_point, BB5::ONE);
+    let suffix_eq = build_suffix_eq_tables_projective(&eq_point, BB5::ONE);
     let eq_rest = &suffix_eq[1];
     #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
     let got = bb5_eq_gruen_projective_eval_packed(&f, &g, eq_rest);
@@ -54,7 +54,7 @@ fn bb5_projective_delayed_eval_matches_reference() {
     let f = make_bb5(1usize << n);
     let g = make_bb5(1usize << n);
     let eq_point = make_bb5(n);
-    let suffix_eq = build_suffix_eq_tables(&eq_point, BB5::ONE);
+    let suffix_eq = build_suffix_eq_tables_projective(&eq_point, BB5::ONE);
     let eq_rest = &suffix_eq[1];
     let (q1, q_inf) = bb5_eq_projective_delayed_eval(&f, &g, eq_rest);
     let (q1_ref, q_inf_ref) = bb5_eq_projective_delayed_eval_ref(&f, &g, eq_rest);
@@ -120,7 +120,7 @@ fn bb5_projective_wrapper_matches_generic() {
     let mut g_packed = g_generic.clone();
     let challenges = make_bb5(n);
     let eq_point = make_bb5(n);
-    let suffix_eq = build_suffix_eq_tables(&eq_point, BB5::ONE);
+    let suffix_eq = build_suffix_eq_tables_projective(&eq_point, BB5::ONE);
 
     sumcheck_deg2_eq_gruen_projective(
         &mut f_generic,
@@ -150,9 +150,14 @@ fn bb5_projective_delayed_wrapper_matches_generic() {
     let mut g_packed = g_generic.clone();
     let challenges = make_bb5(n);
     let eq_point = make_bb5(n);
-    let suffix_eq = build_suffix_eq_tables(&eq_point, BB5::ONE);
+    let suffix_eq = build_suffix_eq_tables_projective(&eq_point, BB5::ONE);
 
-    sumcheck_deg2_eq_projective_delayed_bb5(&mut f_generic, &mut g_generic, &suffix_eq, &challenges);
+    sumcheck_deg2_eq_projective_delayed_bb5(
+        &mut f_generic,
+        &mut g_generic,
+        &suffix_eq,
+        &challenges,
+    );
     sumcheck_deg2_eq_projective_delayed_bb5_packed(
         &mut f_packed,
         &mut g_packed,
@@ -277,7 +282,7 @@ fn bn254_upper_projective_eq_paths_match_standard() {
         .iter()
         .map(|&(lo, hi)| BN254Fr::new_unchecked(ark_ff::BigInt([0, 0, lo, hi])))
         .collect();
-    let suffix_eq = build_suffix_eq_tables(&eq_point, BN254Fr::from(1u64));
+    let suffix_eq = build_suffix_eq_tables_projective(&eq_point, BN254Fr::from(1u64));
 
     let mut f_generic = f_orig.clone();
     let mut g_generic = g_orig.clone();
@@ -375,7 +380,7 @@ fn kb5_delayed_projective_paths_match_generic() {
     assert_eq!(g_delayed, g_generic);
 
     let eq_point = make_kb5(n);
-    let suffix_eq = build_suffix_eq_tables(&eq_point, KB5::ONE);
+    let suffix_eq = build_suffix_eq_tables_projective(&eq_point, KB5::ONE);
     let mut f_generic_eq = f_orig.clone();
     let mut g_generic_eq = g_orig.clone();
     let mut f_delayed_eq = f_orig;

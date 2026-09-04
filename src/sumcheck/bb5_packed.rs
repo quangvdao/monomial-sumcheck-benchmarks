@@ -1,7 +1,10 @@
 use super::bb_ext::{BB5Accum, BB5MulByConst};
 use super::*;
 
-#[cfg_attr(all(target_arch = "aarch64", target_feature = "neon"), allow(dead_code))]
+#[cfg_attr(
+    all(target_arch = "aarch64", target_feature = "neon"),
+    allow(dead_code)
+)]
 pub fn bb5_eq_gruen_boolean_eval_ref(f: &[BB5], g: &[BB5], eq_rest: &[BB5]) -> (BB5, BB5) {
     let half = f.len() / 2;
     let mut q1 = BB5::ZERO;
@@ -23,7 +26,10 @@ pub fn bb5_eq_gruen_boolean_eval_ref(f: &[BB5], g: &[BB5], eq_rest: &[BB5]) -> (
     (q1, q_inf)
 }
 
-#[cfg_attr(all(target_arch = "aarch64", target_feature = "neon"), allow(dead_code))]
+#[cfg_attr(
+    all(target_arch = "aarch64", target_feature = "neon"),
+    allow(dead_code)
+)]
 pub fn bb5_eq_gruen_projective_eval_ref(f: &[BB5], g: &[BB5], eq_rest: &[BB5]) -> (BB5, BB5) {
     let half = f.len() / 2;
     let mut q1 = BB5::ZERO;
@@ -61,7 +67,10 @@ fn sum_packed_bb5(acc: PackedBB5) -> BB5 {
     sum
 }
 
-#[cfg_attr(all(target_arch = "aarch64", target_feature = "neon"), allow(dead_code))]
+#[cfg_attr(
+    all(target_arch = "aarch64", target_feature = "neon"),
+    allow(dead_code)
+)]
 pub fn bb5_eq_delayed_eval_ref(f: &[BB5], g: &[BB5], eq_rest: &[BB5]) -> (BB5Accum, BB5Accum) {
     let half = f.len() / 2;
     let mut q1 = BB5Accum::zero();
@@ -83,7 +92,10 @@ pub fn bb5_eq_delayed_eval_ref(f: &[BB5], g: &[BB5], eq_rest: &[BB5]) -> (BB5Acc
     (q1, q_inf)
 }
 
-#[cfg_attr(all(target_arch = "aarch64", target_feature = "neon"), allow(dead_code))]
+#[cfg_attr(
+    all(target_arch = "aarch64", target_feature = "neon"),
+    allow(dead_code)
+)]
 pub fn bb5_eq_projective_delayed_eval_ref(
     f: &[BB5],
     g: &[BB5],
@@ -138,7 +150,8 @@ fn bb5_accum_fmadd_packed(acc: &mut BB5Accum, a: PackedBB5, b: PackedBB5) {
     unsafe {
         acc.c[0] += bb_neon_sum_mul_4(a0, b0);
         acc.c[1] += bb_neon_sum_mul_4(a0, b1) + bb_neon_sum_mul_4(a1, b0);
-        acc.c[2] += bb_neon_sum_mul_4(a0, b2) + bb_neon_sum_mul_4(a1, b1) + bb_neon_sum_mul_4(a2, b0);
+        acc.c[2] +=
+            bb_neon_sum_mul_4(a0, b2) + bb_neon_sum_mul_4(a1, b1) + bb_neon_sum_mul_4(a2, b0);
         acc.c[3] += bb_neon_sum_mul_4(a0, b3)
             + bb_neon_sum_mul_4(a1, b2)
             + bb_neon_sum_mul_4(a2, b1)
@@ -152,7 +165,8 @@ fn bb5_accum_fmadd_packed(acc: &mut BB5Accum, a: PackedBB5, b: PackedBB5) {
             + bb_neon_sum_mul_4(a2, b3)
             + bb_neon_sum_mul_4(a3, b2)
             + bb_neon_sum_mul_4(a4, b1);
-        acc.c[6] += bb_neon_sum_mul_4(a2, b4) + bb_neon_sum_mul_4(a3, b3) + bb_neon_sum_mul_4(a4, b2);
+        acc.c[6] +=
+            bb_neon_sum_mul_4(a2, b4) + bb_neon_sum_mul_4(a3, b3) + bb_neon_sum_mul_4(a4, b2);
         acc.c[7] += bb_neon_sum_mul_4(a3, b4) + bb_neon_sum_mul_4(a4, b3);
         acc.c[8] += bb_neon_sum_mul_4(a4, b4);
     }
@@ -177,7 +191,8 @@ fn bb5_accum_fmadd_packed_outlined(acc: &mut BB5Accum, a: PackedBB5, b: PackedBB
     unsafe {
         acc.c[0] += bb_neon_sum_mul_4(a0, b0);
         acc.c[1] += bb_neon_sum_mul_4(a0, b1) + bb_neon_sum_mul_4(a1, b0);
-        acc.c[2] += bb_neon_sum_mul_4(a0, b2) + bb_neon_sum_mul_4(a1, b1) + bb_neon_sum_mul_4(a2, b0);
+        acc.c[2] +=
+            bb_neon_sum_mul_4(a0, b2) + bb_neon_sum_mul_4(a1, b1) + bb_neon_sum_mul_4(a2, b0);
         acc.c[3] += bb_neon_sum_mul_4(a0, b3)
             + bb_neon_sum_mul_4(a1, b2)
             + bb_neon_sum_mul_4(a2, b1)
@@ -191,7 +206,8 @@ fn bb5_accum_fmadd_packed_outlined(acc: &mut BB5Accum, a: PackedBB5, b: PackedBB
             + bb_neon_sum_mul_4(a2, b3)
             + bb_neon_sum_mul_4(a3, b2)
             + bb_neon_sum_mul_4(a4, b1);
-        acc.c[6] += bb_neon_sum_mul_4(a2, b4) + bb_neon_sum_mul_4(a3, b3) + bb_neon_sum_mul_4(a4, b2);
+        acc.c[6] +=
+            bb_neon_sum_mul_4(a2, b4) + bb_neon_sum_mul_4(a3, b3) + bb_neon_sum_mul_4(a4, b2);
         acc.c[7] += bb_neon_sum_mul_4(a3, b4) + bb_neon_sum_mul_4(a4, b3);
         acc.c[8] += bb_neon_sum_mul_4(a4, b4);
     }

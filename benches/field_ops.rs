@@ -10,6 +10,7 @@ use binius_field::PackedBinaryGhash1x128b as GF128Packed;
 use binius_field::PackedField as BiniusPackedField;
 use hachi_pcs::algebra::{Fp128Packing, PackedField, PackedValue, Prime128Offset275};
 use hachi_pcs::{AdditiveGroup as HachiAdditiveGroup, CanonicalField, FieldCore};
+use monomial_sumcheck_benchmarks::benchmark_config;
 use p3_baby_bear::BabyBear;
 use p3_field::extension::{BinomialExtensionField, QuinticTrinomialExtensionField};
 use p3_field::PrimeCharacteristicRing;
@@ -138,7 +139,8 @@ fn make_bb_ext<const D: usize>(n: usize) -> Vec<BinomialExtensionField<BabyBear,
     let p = ((1u64 << 31) - (1u64 << 27) + 1) as u32;
     (0..n)
         .map(|_| {
-            let base: [BabyBear; D] = std::array::from_fn(|_| BabyBear::from_u32(r.gen::<u32>() % p));
+            let base: [BabyBear; D] =
+                std::array::from_fn(|_| BabyBear::from_u32(r.gen::<u32>() % p));
             BinomialExtensionField::new(base)
         })
         .collect()
@@ -289,15 +291,17 @@ fn bench_gf128(c: &mut Criterion) {
     thr_mul::<_, 16>(name, &a, c);
 }
 
-criterion_group!(
-    benches,
-    bench_babybear,
-    bench_babybear_ext4,
-    bench_babybear_ext5,
-    bench_koalabear_ext5,
-    bench_fp128,
-    bench_fp128_packed,
-    bench_bn254,
-    bench_gf128
-);
+criterion_group! {
+    name = benches;
+    config = benchmark_config();
+    targets =
+        bench_babybear,
+        bench_babybear_ext4,
+        bench_babybear_ext5,
+        bench_koalabear_ext5,
+        bench_fp128,
+        bench_fp128_packed,
+        bench_bn254,
+        bench_gf128
+}
 criterion_main!(benches);

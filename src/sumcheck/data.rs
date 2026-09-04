@@ -66,12 +66,27 @@ pub fn make_bn254_upper_limb_challenges(n: usize) -> (Vec<BN254Fr>, Vec<(u64, u6
     let mut challenges = Vec::with_capacity(n);
     let mut limbs = Vec::with_capacity(n);
     for chunk in raw.chunks(2) {
-        let lo = chunk[0];
-        let hi = chunk[1] >> 3;
-        challenges.push(BN254Fr::new_unchecked(ark_ff::BigInt([0, 0, lo, hi])));
-        limbs.push((lo, hi));
+        let bytes = ((chunk[0] as u128) | ((chunk[1] as u128) << 64)).to_le_bytes();
+        let (challenge, challenge_limbs) = bn254_upper_limb_challenge_from_bytes(bytes);
+        challenges.push(challenge);
+        limbs.push(challenge_limbs);
     }
     (challenges, limbs)
+}
+
+/// Map 128 uniformly distributed transcript bits to the 125-bit BN254
+/// upper-limb challenge set used by the specialized multiplication kernel.
+///
+/// The three most significant input bits are discarded. The returned field
+/// element is already in Montgomery representation with two zero low limbs.
+pub fn bn254_upper_limb_challenge_from_bytes(bytes: [u8; 16]) -> (BN254Fr, (u64, u64)) {
+    let limb_lo = u64::from_le_bytes(bytes[..8].try_into().expect("slice length is fixed"));
+    let limb_hi = u64::from_le_bytes(bytes[8..].try_into().expect("slice length is fixed"))
+        & ((1u64 << 61) - 1);
+    (
+        BN254Fr::new_unchecked(ark_ff::BigInt([0, 0, limb_lo, limb_hi])),
+        (limb_lo, limb_hi),
+    )
 }
 
 /// Build suffix eq tables: tables[k] = eq(w[k..n], ·) of size 2^{n-k}.
@@ -91,6 +106,32 @@ where
             let s = tables[k + 1][i];
             cur.push(s * (one - w[k]));
             cur.push(s * w[k]);
+        }
+        tables[k] = cur;
+    }
+    tables
+}
+
+/// Build coefficient tables for the projective equality polynomial
+/// `prod_i (1 + w_i X_i)`.
+///
+/// `tables[k]` contains the monomial coefficients for variables `k..n`, in
+/// the same low-variable-first layout consumed by the projective kernels.
+pub fn build_suffix_eq_tables_projective<F>(w: &[F], one: F) -> Vec<Vec<F>>
+where
+    F: Copy + Mul<Output = F>,
+{
+    let n = w.len();
+    let mut tables: Vec<Vec<F>> = Vec::with_capacity(n + 1);
+    tables.resize_with(n + 1, Vec::new);
+    tables[n] = vec![one];
+    for k in (0..n).rev() {
+        let prev_len = tables[k + 1].len();
+        let mut cur = Vec::with_capacity(prev_len * 2);
+        for i in 0..prev_len {
+            let coefficient = tables[k + 1][i];
+            cur.push(coefficient);
+            cur.push(coefficient * w[k]);
         }
         tables[k] = cur;
     }

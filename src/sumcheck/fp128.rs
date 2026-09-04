@@ -126,8 +126,7 @@ pub fn init_sumcheck_deg2_eq_gruen_projective_1inf_fp128_claim(
     eq_point: &[Fp128],
     zero: Fp128,
 ) -> Fp128 {
-    let (q0, q1) =
-        sumcheck_deg2_eq_gruen_projective_1inf_q0_q1_fp128(f, g, &suffix_eq[1], zero);
+    let (q0, q1) = sumcheck_deg2_eq_gruen_projective_1inf_q0_q1_fp128(f, g, &suffix_eq[1], zero);
     let w = eq_point[0];
     let one_minus_w = Fp128::one() - w;
     q1.mul_add(w, one_minus_w * q0)
@@ -275,11 +274,7 @@ impl Fp128Accum {
     }
 }
 
-pub fn sumcheck_deg2_delayed_fp128(
-    f: &mut Vec<Fp128>,
-    g: &mut Vec<Fp128>,
-    challenges: &[Fp128],
-) {
+pub fn sumcheck_deg2_delayed_fp128(f: &mut Vec<Fp128>, g: &mut Vec<Fp128>, challenges: &[Fp128]) {
     for round in 0..challenges.len() {
         let half = f.len() / 2;
 
