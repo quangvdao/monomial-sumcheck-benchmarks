@@ -177,6 +177,182 @@ fn bench_bn254(c: &mut Criterion) {
     }
 }
 
+// BN254 with branch-free addition and subtraction. Same cases as `bench_bn254`;
+// the delayed cases use the generic copies of the BN254 delayed kernels.
+fn bench_bn254_branch_free(c: &mut Criterion) {
+    let ns = [16u32, 20, 24];
+
+    {
+        let mut group = c.benchmark_group("sumcheck_deg2/BN254_bf");
+        for &n in &ns {
+            let n_usize = n as usize;
+            let f_orig = make_bn254_branch_free(1usize << n_usize);
+            let g_orig = make_bn254_branch_free(1usize << n_usize);
+            let challenges = make_bn254_branch_free(n_usize);
+
+            let mut order = [0usize, 1, 2, 3];
+            order.shuffle(&mut rand::thread_rng());
+            for &idx in &order {
+                match idx {
+                    0 => {
+                        group.bench_with_input(BenchmarkId::new("boolean", n), &n, |b, _| {
+                            b.iter_batched(
+                                || (f_orig.clone(), g_orig.clone()),
+                                |(mut f, mut g)| {
+                                    sumcheck_deg2_boolean(
+                                        &mut f,
+                                        &mut g,
+                                        &challenges,
+                                        Bn254BranchFree::ZERO,
+                                    );
+                                },
+                                criterion::BatchSize::LargeInput,
+                            )
+                        });
+                    }
+                    1 => {
+                        group.bench_with_input(BenchmarkId::new("delayed", n), &n, |b, _| {
+                            b.iter_batched(
+                                || (f_orig.clone(), g_orig.clone()),
+                                |(mut f, mut g)| {
+                                    sumcheck_deg2_delayed_bn254_generic(
+                                        &mut f,
+                                        &mut g,
+                                        &challenges,
+                                    );
+                                },
+                                criterion::BatchSize::LargeInput,
+                            )
+                        });
+                    }
+                    2 => {
+                        group.bench_with_input(BenchmarkId::new("projective", n), &n, |b, _| {
+                            b.iter_batched(
+                                || (f_orig.clone(), g_orig.clone()),
+                                |(mut f, mut g)| {
+                                    sumcheck_deg2_projective(
+                                        &mut f,
+                                        &mut g,
+                                        &challenges,
+                                        Bn254BranchFree::ZERO,
+                                    );
+                                },
+                                criterion::BatchSize::LargeInput,
+                            )
+                        });
+                    }
+                    3 => {
+                        group.bench_with_input(BenchmarkId::new("proj_delayed", n), &n, |b, _| {
+                            b.iter_batched(
+                                || (f_orig.clone(), g_orig.clone()),
+                                |(mut f, mut g)| {
+                                    sumcheck_deg2_projective_delayed_bn254_generic(
+                                        &mut f,
+                                        &mut g,
+                                        &challenges,
+                                    );
+                                },
+                                criterion::BatchSize::LargeInput,
+                            )
+                        });
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+        group.finish();
+    }
+
+    {
+        let mut group = c.benchmark_group("sumcheck_deg2_eq/BN254_bf");
+        for &n in &ns {
+            let n_usize = n as usize;
+            let f_orig = make_bn254_branch_free(1usize << n_usize);
+            let g_orig = make_bn254_branch_free(1usize << n_usize);
+            let challenges = make_bn254_branch_free(n_usize);
+            let eq_point = make_bn254_branch_free(n_usize);
+            let suffix_eq_boolean = build_suffix_eq_tables(&eq_point, Bn254BranchFree::ONE);
+            let suffix_eq_projective =
+                build_suffix_eq_tables_projective(&eq_point, Bn254BranchFree::ONE);
+
+            let mut order = [0usize, 1, 2, 3];
+            order.shuffle(&mut rand::thread_rng());
+            for &idx in &order {
+                match idx {
+                    0 => {
+                        group.bench_with_input(BenchmarkId::new("boolean", n), &n, |b, _| {
+                            b.iter_batched(
+                                || (f_orig.clone(), g_orig.clone()),
+                                |(mut f, mut g)| {
+                                    sumcheck_deg2_eq_gruen_boolean(
+                                        &mut f,
+                                        &mut g,
+                                        &suffix_eq_boolean,
+                                        &challenges,
+                                        Bn254BranchFree::ZERO,
+                                    );
+                                },
+                                criterion::BatchSize::LargeInput,
+                            )
+                        });
+                    }
+                    1 => {
+                        group.bench_with_input(BenchmarkId::new("delayed", n), &n, |b, _| {
+                            b.iter_batched(
+                                || (f_orig.clone(), g_orig.clone()),
+                                |(mut f, mut g)| {
+                                    sumcheck_deg2_eq_delayed_bn254_generic(
+                                        &mut f,
+                                        &mut g,
+                                        &suffix_eq_boolean,
+                                        &challenges,
+                                    );
+                                },
+                                criterion::BatchSize::LargeInput,
+                            )
+                        });
+                    }
+                    2 => {
+                        group.bench_with_input(BenchmarkId::new("projective", n), &n, |b, _| {
+                            b.iter_batched(
+                                || (f_orig.clone(), g_orig.clone()),
+                                |(mut f, mut g)| {
+                                    sumcheck_deg2_eq_gruen_projective(
+                                        &mut f,
+                                        &mut g,
+                                        &suffix_eq_projective,
+                                        &challenges,
+                                        Bn254BranchFree::ZERO,
+                                    );
+                                },
+                                criterion::BatchSize::LargeInput,
+                            )
+                        });
+                    }
+                    3 => {
+                        group.bench_with_input(BenchmarkId::new("proj_delayed", n), &n, |b, _| {
+                            b.iter_batched(
+                                || (f_orig.clone(), g_orig.clone()),
+                                |(mut f, mut g)| {
+                                    sumcheck_deg2_eq_projective_delayed_bn254_generic(
+                                        &mut f,
+                                        &mut g,
+                                        &suffix_eq_projective,
+                                        &challenges,
+                                    );
+                                },
+                                criterion::BatchSize::LargeInput,
+                            )
+                        });
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+        group.finish();
+    }
+}
+
 fn bench_bn254_upper(c: &mut Criterion) {
     let ns = [16u32, 20, 24];
 
@@ -1002,6 +1178,6 @@ fn bench_gf128(c: &mut Criterion) {
 criterion_group! {
     name = benches;
     config = benchmark_config();
-    targets = bench_bn254, bench_bn254_upper, bench_bb4, bench_bb5, bench_kb5, bench_fp128, bench_gf128
+    targets = bench_bn254, bench_bn254_branch_free, bench_bn254_upper, bench_bb4, bench_bb5, bench_kb5, bench_fp128, bench_gf128
 }
 criterion_main!(benches);

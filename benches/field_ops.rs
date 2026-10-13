@@ -23,7 +23,12 @@ type BB5 = BinomialExtensionField<BabyBear, 5>;
 type KB5 = QuinticTrinomialExtensionField<KoalaBear>;
 type PackedFp128 = Fp128Packing<0xfffffffffffffffffffffffffffffeedu128>;
 
-const N: usize = 4096;
+// Length of the latency chains.  It matches the 2^20-entry tables of the
+// other suites and is long enough that a branch predictor cannot learn the
+// outcome sequence of data-dependent branches (ark-ff add/sub/mul each
+// contain one): with a short repeated input such as 4096 elements, BN254
+// addition measures 0.8 ns instead of 2.8 ns.
+const N: usize = 1 << 20;
 
 fn rng() -> StdRng {
     StdRng::seed_from_u64(0x12345678deadbeef)

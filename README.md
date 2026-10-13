@@ -6,10 +6,12 @@ Benchmark harness for the paper *The Sum-Check Protocol over the Monomial Basis,
 
 | Suite | File | What it measures |
 |---|---|---|
-| `field_ops` | `benches/field_ops.rs` | Field add/sub/mul latency and throughput across BN254, Fp128, BabyBear extensions, GF(2^128) |
-| `binding` | `benches/binding.rs` | Per-element binding latency, upper-limb multiplication, and combined in-place binding (Section 6.4) |
+| `field_ops` | `benches/field_ops.rs` | Field add/sub/mul latency and throughput across BN254, Fp128, BabyBear extensions, GF(2^128); latency chains run over 2^20 random operands |
+| `binding` | `benches/binding.rs` | Upper-limb multiplication and combined in-place binding (Section 6.4) |
 | `lookup_tables` | `benches/lookup_tables.rs` | Full-domain EQ and LT table construction |
 | `sumcheck` | `benches/sumcheck.rs` | Complete evaluation-and-binding prover kernels for degree-2 and degree-2 x eq sum-check, with precomputed challenges |
+
+The `binding`, `lookup_tables`, and `sumcheck` suites also run BN254 in a branch-free configuration (`Bn254BranchFree`, IDs containing `bf`): branch-free addition and subtraction with arkworks' multiplication, so that mispredicted branches in arkworks' add/sub do not enter the Boolean/projective comparison.
 
 ## Code layout
 
@@ -18,7 +20,7 @@ Benchmark harness for the paper *The Sum-Check Protocol over the Monomial Basis,
 - `src/sumcheck/mod.rs`: sumcheck module surface and re-exports used by benches and tests
 - `src/sumcheck/data.rs`: synthetic input builders and suffix-EQ table helpers
 - `src/sumcheck/generic.rs`: field-agnostic boolean and projective sumcheck kernels
-- `src/sumcheck/bn254.rs`: BN254 delayed accumulators and upper-limb challenge variants
+- `src/sumcheck/bn254.rs`: BN254 delayed accumulators, the branch-free add/sub element type, and upper-limb challenge variants
 - `src/sumcheck/fp128.rs`: Fp128 kernels, delayed accumulators, and `1/inf` experiments
 - `src/sumcheck/bb_ext.rs`: BB4, BB5, and KB5 delayed accumulators and bind helpers
 - `src/sumcheck/bb5_packed.rs`: packed BB5 EQ evaluators and wrapper paths
@@ -51,7 +53,7 @@ Rust toolchain: `1.94.0` (pinned in `rust-toolchain.toml`).
 - The combined binding benchmark (`bench_combined` in `binding.rs`) follows Jolt's `bound_poly_var_top` layout: in-place binding on a contiguous 2N-element array. Criterion prepares the working buffer outside the timed routine, so no separately measured copy time is subtracted.
 - Headline results require at least 20 outer repetitions, with each compared case run in its own fresh process. The repository reports 99% bootstrap intervals and empirical p01/p99 process-level quantiles, with speedups paired by outer repetition.
 - The collector records system-load snapshots and refuses paper-data collection when the one-minute load average exceeds 0.25 per logical CPU. `--allow-busy` is for non-publishable smoke tests only.
-- Some hot kernels in `src/sumcheck/` intentionally keep non-obvious source ordering, helper splitting, or duplicate reloads because those shapes produce measurably better LLVM codegen on the M4/NEON target. `benches/sumcheck.rs` is intentionally kept as thin wiring around those kernels. Re-benchmark those paths before simplifying them for style.
+- Each projective kernel for BabyBear and KoalaBear extensions in `src/sumcheck/` is a line-for-line mirror of its Boolean baseline, differing only in sums versus differences, so neither variant gets a code shape the other lacks (see [docs/code-shaping.md](docs/code-shaping.md)). `benches/sumcheck.rs` is intentionally kept as thin wiring around those kernels. Keep the two variants mirrored when changing either.
 
 See [docs/benchmark-methodology.md](docs/benchmark-methodology.md) for the measurement boundary, collection protocol, statistical procedure, and artifact-acceptance rules.
 

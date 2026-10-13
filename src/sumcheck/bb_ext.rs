@@ -160,6 +160,19 @@ unsafe fn bb_neon_monty_reduce(res_lo: uint64x2_t, res_hi: uint64x2_t) -> uint32
     vaddq_u32(vsubq_u32(hi_reduced, monty), vandq_u32(cmp, p))
 }
 
+/// Keep a lane that already holds four products of canonical limbs able to
+/// take a fifth.  Four products fit (`4 (P-1)^2 < 2^64`) but five do not
+/// (`5 (P-1)^2 > 2^64`), and `bb_neon_monty_reduce` needs its input below
+/// `2^33 P`.  A lane at or above `2^63` drops by `2^32 P`, which changes
+/// neither its residue nor its low 32 bits; afterwards the lane is below
+/// `2^63`, so adding one more product stays below `2^63 + P^2 < 2^33 P`.
+#[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+#[inline(always)]
+unsafe fn bb_neon_fold_four_products(acc: uint64x2_t) -> uint64x2_t {
+    let at_least_2_63 = vreinterpretq_u64_s64(vshrq_n_s64::<63>(vreinterpretq_s64_u64(acc)));
+    vsubq_u64(acc, vandq_u64(at_least_2_63, vdupq_n_u64(BB_PRIME << 32)))
+}
+
 struct BB4MulByConst {
     #[cfg(not(all(target_arch = "aarch64", target_feature = "neon")))]
     r: BB4,
@@ -296,11 +309,13 @@ impl BB5MulByConst {
                 lo = vmlal_lane_u32::<1>(lo, self.rhs_lo[1], x_lo);
                 lo = vmlal_lane_u32::<0>(lo, self.rhs_lo[2], x_hi);
                 lo = vmlal_lane_u32::<1>(lo, self.rhs_lo[3], x_hi);
+                lo = bb_neon_fold_four_products(lo);
                 lo = vmlal_lane_u32::<0>(lo, self.rhs_lo[4], x4);
                 let mut hi = vmull_lane_u32::<0>(self.rhs_hi[0], x_lo);
                 hi = vmlal_lane_u32::<1>(hi, self.rhs_hi[1], x_lo);
                 hi = vmlal_lane_u32::<0>(hi, self.rhs_hi[2], x_hi);
                 hi = vmlal_lane_u32::<1>(hi, self.rhs_hi[3], x_hi);
+                hi = bb_neon_fold_four_products(hi);
                 hi = vmlal_lane_u32::<0>(hi, self.rhs_hi[4], x4);
                 let dot: [u32; 4] = std::mem::transmute(bb_neon_monty_reduce(lo, hi));
                 let x_coeffs = bb5_to_coeffs(x);
@@ -554,11 +569,11 @@ macro_rules! delayed_sumcheck_fns {
                         let fi = f[2 * j + 1];
                         let g0 = g[2 * j];
                         let gi = g[2 * j + 1];
-                        h0.fmadd(f0, g0);
-                        h_inf.fmadd(fi, gi);
                         let sf = f0 + fi;
                         let sg = g0 + gi;
+                        h0.fmadd(f0, g0);
                         h1.fmadd(sf, sg);
+                        h_inf.fmadd(fi, gi);
                     }
                     let _ = black_box((h0.reduce(), h1.reduce(), h_inf.reduce()));
                     let r = challenges[round];
@@ -595,10 +610,10 @@ macro_rules! delayed_sumcheck_fns {
                         let g0 = g[2 * j];
                         let gi = g[2 * j + 1];
                         let ew = eq_rest[j];
-                        q_inf.fmadd(fi * gi, ew);
                         let sf = f0 + fi;
                         let sg = g0 + gi;
                         q1.fmadd(sf * sg, ew);
+                        q_inf.fmadd(fi * gi, ew);
                     }
                     let _ = black_box((q1.reduce(), q_inf.reduce()));
                     let r = challenges[round];
@@ -622,3 +637,57 @@ macro_rules! delayed_sumcheck_fns {
 delayed_sumcheck_fns!(BB4, BB4Accum, BB4MulByConst, bb4);
 delayed_sumcheck_fns!(BB5, BB5Accum, BB5MulByConst, bb5);
 delayed_sumcheck_fns!(KB5, KB5Accum, KB5MulByConst, kb5);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const P: u32 = BB_PRIME as u32;
+
+    // Raw Montgomery limbs near both ends of the canonical range [0, P).
+    fn adversarial_limbs() -> Vec<u32> {
+        let mut limbs = vec![0, 1, 2, P / 2, P - 2, P - 1];
+        limbs.extend(make_u64s(8).iter().map(|&v| P - 1 - (v as u32 >> 12)));
+        limbs
+    }
+
+    #[test]
+    fn bb5_mul_by_const_matches_plain_mul_at_max_limbs() {
+        let r = bb5_from_limbs([P - 1; 5]);
+        let x = bb5_from_limbs([P - 1; 5]);
+        assert_eq!(BB5MulByConst::new(r).apply(x), r * x);
+    }
+
+    #[test]
+    fn bb5_mul_by_const_matches_plain_mul_on_large_limbs() {
+        let limbs = adversarial_limbs();
+        let pick = |seed: usize| -> BB5 {
+            bb5_from_limbs(std::array::from_fn(|i| {
+                limbs[(seed / limbs.len().pow(i as u32)) % limbs.len()]
+            }))
+        };
+        // A fixed stride visits a spread of the limbs.len()^5 combinations.
+        let total = limbs.len().pow(5);
+        for i in (0..total).step_by(997) {
+            let r = pick(i);
+            let mul_r = BB5MulByConst::new(r);
+            for j in (0..total).step_by(7919) {
+                let x = pick(j);
+                assert_eq!(mul_r.apply(x), r * x);
+            }
+        }
+        for (r, x) in make_bb5(1000).into_iter().zip(make_bb5(1000)) {
+            assert_eq!(BB5MulByConst::new(r).apply(x), r * x);
+        }
+    }
+
+    #[test]
+    fn bb4_mul_by_const_matches_plain_mul_at_max_limbs() {
+        let r = bb4_from_limbs([P - 1; 4]);
+        let x = bb4_from_limbs([P - 1; 4]);
+        assert_eq!(BB4MulByConst::new(r).apply(x), r * x);
+        for (r, x) in make_bb4(1000).into_iter().zip(make_bb4(1000)) {
+            assert_eq!(BB4MulByConst::new(r).apply(x), r * x);
+        }
+    }
+}

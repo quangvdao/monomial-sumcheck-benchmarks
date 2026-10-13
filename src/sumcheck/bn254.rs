@@ -127,6 +127,136 @@ impl BN254Accum {
     }
 }
 
+#[inline(always)]
+fn adc_branch_free(a: u64, b: u64, carry: u64) -> (u64, u64) {
+    let tmp = (a as u128) + (b as u128) + (carry as u128);
+    (tmp as u64, (tmp >> 64) as u64)
+}
+
+#[inline(always)]
+fn sbb_branch_free(a: u64, b: u64, borrow: u64) -> (u64, u64) {
+    let tmp = (a as u128)
+        .wrapping_sub(b as u128)
+        .wrapping_sub(borrow as u128);
+    (tmp as u64, ((tmp >> 64) as u64) & 1)
+}
+
+/// `a + b mod p` for canonical inputs, selecting the reduced sum with a mask.
+#[inline(always)]
+fn bn254_add_branch_free(a: BN254Fr, b: BN254Fr) -> BN254Fr {
+    let a = bn254_to_limbs(a);
+    let b = bn254_to_limbs(b);
+    let (s0, carry) = adc_branch_free(a[0], b[0], 0);
+    let (s1, carry) = adc_branch_free(a[1], b[1], carry);
+    let (s2, carry) = adc_branch_free(a[2], b[2], carry);
+    let (s3, _) = adc_branch_free(a[3], b[3], carry);
+    let (d0, borrow) = sbb_branch_free(s0, BN254_MODULUS[0], 0);
+    let (d1, borrow) = sbb_branch_free(s1, BN254_MODULUS[1], borrow);
+    let (d2, borrow) = sbb_branch_free(s2, BN254_MODULUS[2], borrow);
+    let (d3, borrow) = sbb_branch_free(s3, BN254_MODULUS[3], borrow);
+    // All ones when the sum is below p, in which case the sum is kept.
+    let keep = 0u64.wrapping_sub(borrow);
+    bn254_from_limbs([
+        d0 ^ ((s0 ^ d0) & keep),
+        d1 ^ ((s1 ^ d1) & keep),
+        d2 ^ ((s2 ^ d2) & keep),
+        d3 ^ ((s3 ^ d3) & keep),
+    ])
+}
+
+/// `a - b mod p` for canonical inputs, adding back a masked modulus.
+#[inline(always)]
+fn bn254_sub_branch_free(a: BN254Fr, b: BN254Fr) -> BN254Fr {
+    let a = bn254_to_limbs(a);
+    let b = bn254_to_limbs(b);
+    let (d0, borrow) = sbb_branch_free(a[0], b[0], 0);
+    let (d1, borrow) = sbb_branch_free(a[1], b[1], borrow);
+    let (d2, borrow) = sbb_branch_free(a[2], b[2], borrow);
+    let (d3, borrow) = sbb_branch_free(a[3], b[3], borrow);
+    // All ones when the difference went negative.
+    let wrapped = 0u64.wrapping_sub(borrow);
+    let (r0, carry) = adc_branch_free(d0, BN254_MODULUS[0] & wrapped, 0);
+    let (r1, carry) = adc_branch_free(d1, BN254_MODULUS[1] & wrapped, carry);
+    let (r2, carry) = adc_branch_free(d2, BN254_MODULUS[2] & wrapped, carry);
+    let (r3, _) = adc_branch_free(d3, BN254_MODULUS[3] & wrapped, carry);
+    bn254_from_limbs([r0, r1, r2, r3])
+}
+
+/// BN254 scalar with branch-free addition and subtraction; multiplication is
+/// arkworks'.
+///
+/// arkworks' `Fr` addition and subtraction branch on the operands. On random
+/// data those branches mispredict, and the Boolean and projective kernels
+/// execute different numbers of them, so the comparison between the two also
+/// measures the branch predictor. This type removes that effect.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct Bn254BranchFree(pub BN254Fr);
+
+impl Bn254BranchFree {
+    pub const ZERO: Self = Self(BN254Fr::ZERO);
+    pub const ONE: Self = Self(<BN254Fr as ark_ff::Field>::ONE);
+}
+
+impl Add for Bn254BranchFree {
+    type Output = Self;
+
+    #[inline(always)]
+    fn add(self, rhs: Self) -> Self {
+        Self(bn254_add_branch_free(self.0, rhs.0))
+    }
+}
+
+impl AddAssign for Bn254BranchFree {
+    #[inline(always)]
+    fn add_assign(&mut self, rhs: Self) {
+        self.0 = bn254_add_branch_free(self.0, rhs.0);
+    }
+}
+
+impl Sub for Bn254BranchFree {
+    type Output = Self;
+
+    #[inline(always)]
+    fn sub(self, rhs: Self) -> Self {
+        Self(bn254_sub_branch_free(self.0, rhs.0))
+    }
+}
+
+impl Mul for Bn254BranchFree {
+    type Output = Self;
+
+    #[inline(always)]
+    fn mul(self, rhs: Self) -> Self {
+        Self(self.0 * rhs.0)
+    }
+}
+
+pub fn make_bn254_branch_free(n: usize) -> Vec<Bn254BranchFree> {
+    make_bn254(n).into_iter().map(Bn254BranchFree).collect()
+}
+
+/// A BN254 element representation accepted by the generic delayed kernels.
+pub trait Bn254Element:
+    Copy + Add<Output = Self> + AddAssign + Sub<Output = Self> + Mul<Output = Self>
+{
+    fn to_fr(self) -> BN254Fr;
+}
+
+impl Bn254Element for BN254Fr {
+    #[inline(always)]
+    fn to_fr(self) -> BN254Fr {
+        self
+    }
+}
+
+impl Bn254Element for Bn254BranchFree {
+    #[inline(always)]
+    fn to_fr(self) -> BN254Fr {
+        self.0
+    }
+}
+
 pub trait Bn254UpperLimbMul {
     fn mul_by_hi_2limbs(self, limb_lo: u64, limb_hi: u64) -> Self;
 }
@@ -318,6 +448,178 @@ pub fn sumcheck_deg2_eq_projective_delayed_bn254(
             let sg = g0 + gi;
             q1.fmadd(sf * sg, ew);
             q_inf.fmadd(fi * gi, ew);
+        }
+
+        black_box((q1.reduce(), q_inf.reduce()));
+
+        let r = challenges[round];
+        for j in 0..half {
+            let f0 = f[2 * j];
+            let fi = f[2 * j + 1];
+            let g0 = g[2 * j];
+            let gi = g[2 * j + 1];
+            f[j] = f0 + r * fi;
+            g[j] = g0 + r * gi;
+        }
+        f.truncate(half);
+        g.truncate(half);
+    }
+}
+
+// The four kernels below repeat the delayed kernels above line for line, with
+// the element type left open so that they also run on `Bn254BranchFree`. The
+// arkworks kernels stay monomorphic so that their code generation is unchanged.
+
+pub fn sumcheck_deg2_delayed_bn254_generic<F: Bn254Element>(
+    f: &mut Vec<F>,
+    g: &mut Vec<F>,
+    challenges: &[F],
+) {
+    for round in 0..challenges.len() {
+        let half = f.len() / 2;
+
+        let mut h0 = BN254Accum::zero();
+        let mut h1 = BN254Accum::zero();
+        let mut h_inf = BN254Accum::zero();
+
+        for j in 0..half {
+            let f0 = f[2 * j];
+            let f1 = f[2 * j + 1];
+            let g0 = g[2 * j];
+            let g1 = g[2 * j + 1];
+            let df = f1 - f0;
+            let dg = g1 - g0;
+
+            h0.fmadd(f0.to_fr(), g0.to_fr());
+            h1.fmadd(f1.to_fr(), g1.to_fr());
+            h_inf.fmadd(df.to_fr(), dg.to_fr());
+        }
+
+        black_box((h0.reduce(), h1.reduce(), h_inf.reduce()));
+
+        let r = challenges[round];
+        for j in 0..half {
+            let f0 = f[2 * j];
+            let f1 = f[2 * j + 1];
+            let g0 = g[2 * j];
+            let g1 = g[2 * j + 1];
+            f[j] = f0 + r * (f1 - f0);
+            g[j] = g0 + r * (g1 - g0);
+        }
+        f.truncate(half);
+        g.truncate(half);
+    }
+}
+
+pub fn sumcheck_deg2_eq_delayed_bn254_generic<F: Bn254Element>(
+    f: &mut Vec<F>,
+    g: &mut Vec<F>,
+    suffix_eq: &[Vec<F>],
+    challenges: &[F],
+) {
+    let n = challenges.len();
+    for round in 0..n {
+        let half = f.len() / 2;
+        let eq_rest = &suffix_eq[round + 1];
+
+        let mut q1 = BN254Accum::zero();
+        let mut q_inf = BN254Accum::zero();
+
+        for j in 0..half {
+            let f0 = f[2 * j];
+            let f1 = f[2 * j + 1];
+            let g0 = g[2 * j];
+            let g1 = g[2 * j + 1];
+            let ew = eq_rest[j];
+            let df = f1 - f0;
+            let dg = g1 - g0;
+
+            q1.fmadd((f1 * g1).to_fr(), ew.to_fr());
+            q_inf.fmadd((df * dg).to_fr(), ew.to_fr());
+        }
+
+        black_box((q1.reduce(), q_inf.reduce()));
+
+        let r = challenges[round];
+        for j in 0..half {
+            let f0 = f[2 * j];
+            let f1 = f[2 * j + 1];
+            let g0 = g[2 * j];
+            let g1 = g[2 * j + 1];
+            f[j] = f0 + r * (f1 - f0);
+            g[j] = g0 + r * (g1 - g0);
+        }
+        f.truncate(half);
+        g.truncate(half);
+    }
+}
+
+pub fn sumcheck_deg2_projective_delayed_bn254_generic<F: Bn254Element>(
+    f: &mut Vec<F>,
+    g: &mut Vec<F>,
+    challenges: &[F],
+) {
+    for round in 0..challenges.len() {
+        let half = f.len() / 2;
+
+        let mut h0 = BN254Accum::zero();
+        let mut h1 = BN254Accum::zero();
+        let mut h_inf = BN254Accum::zero();
+
+        for j in 0..half {
+            let f0 = f[2 * j];
+            let fi = f[2 * j + 1];
+            let g0 = g[2 * j];
+            let gi = g[2 * j + 1];
+
+            let sf = f0 + fi;
+            let sg = g0 + gi;
+            h0.fmadd(f0.to_fr(), g0.to_fr());
+            h1.fmadd(sf.to_fr(), sg.to_fr());
+            h_inf.fmadd(fi.to_fr(), gi.to_fr());
+        }
+
+        black_box((h0.reduce(), h1.reduce(), h_inf.reduce()));
+
+        let r = challenges[round];
+        for j in 0..half {
+            let f0 = f[2 * j];
+            let fi = f[2 * j + 1];
+            let g0 = g[2 * j];
+            let gi = g[2 * j + 1];
+            f[j] = f0 + r * fi;
+            g[j] = g0 + r * gi;
+        }
+        f.truncate(half);
+        g.truncate(half);
+    }
+}
+
+pub fn sumcheck_deg2_eq_projective_delayed_bn254_generic<F: Bn254Element>(
+    f: &mut Vec<F>,
+    g: &mut Vec<F>,
+    suffix_eq: &[Vec<F>],
+    challenges: &[F],
+) {
+    let n = challenges.len();
+    for round in 0..n {
+        let half = f.len() / 2;
+        let eq_rest = &suffix_eq[round + 1];
+
+        let mut q1 = BN254Accum::zero();
+        let mut q_inf = BN254Accum::zero();
+
+        for j in 0..half {
+            let f0 = f[2 * j];
+            let fi = f[2 * j + 1];
+            let g0 = g[2 * j];
+            let gi = g[2 * j + 1];
+            let ew = eq_rest[j];
+
+            let sf = f0 + fi;
+            let sg = g0 + gi;
+            q1.fmadd((sf * sg).to_fr(), ew.to_fr());
+            q_inf.fmadd((fi * gi).to_fr(), ew.to_fr());
         }
 
         black_box((q1.reduce(), q_inf.reduce()));
@@ -707,5 +1009,110 @@ mod tests {
                 assert_eq!(x.mul_by_hi_2limbs(lo, hi), x * challenge);
             }
         }
+    }
+    #[test]
+    fn branch_free_add_sub_match_arkworks() {
+        let mut values = vec![
+            BN254Fr::ZERO,
+            BN254Fr::from(1u64),
+            -BN254Fr::from(1u64),
+            -BN254Fr::from(2u64),
+            bn254_from_limbs([u64::MAX, 0, 0, 0]),
+            bn254_from_limbs([0, 0, 0, BN254_MODULUS[3]]),
+        ];
+        // p - 1 as a raw Montgomery residue, the largest canonical limbs.
+        values.push(bn254_from_limbs(sub4(BN254_MODULUS, [1, 0, 0, 0])));
+        for &a in &values {
+            for &b in &values {
+                assert_eq!(bn254_add_branch_free(a, b), a + b);
+                assert_eq!(bn254_sub_branch_free(a, b), a - b);
+            }
+        }
+
+        let random = make_bn254(4000);
+        for pair in random.windows(2) {
+            let (a, b) = (pair[0], pair[1]);
+            assert_eq!(bn254_add_branch_free(a, b), a + b);
+            assert_eq!(bn254_sub_branch_free(a, b), a - b);
+            for &edge in &values {
+                assert_eq!(bn254_add_branch_free(a, edge), a + edge);
+                assert_eq!(bn254_add_branch_free(edge, a), edge + a);
+                assert_eq!(bn254_sub_branch_free(a, edge), a - edge);
+                assert_eq!(bn254_sub_branch_free(edge, a), edge - a);
+            }
+        }
+    }
+
+    fn unwrap_branch_free(values: Vec<Bn254BranchFree>) -> Vec<BN254Fr> {
+        values.into_iter().map(|value| value.0).collect()
+    }
+
+    #[test]
+    fn branch_free_delayed_kernels_match_arkworks() {
+        let n = 6usize;
+        let f_orig = make_bn254(1usize << n);
+        let g_orig = make_bn254(1usize << n);
+        let challenges = make_bn254(n);
+        let wrap = |values: &[BN254Fr]| -> Vec<Bn254BranchFree> {
+            values.iter().copied().map(Bn254BranchFree).collect()
+        };
+        let challenges_bf = wrap(&challenges);
+
+        let (mut f, mut g) = (f_orig.clone(), g_orig.clone());
+        let (mut f_bf, mut g_bf) = (wrap(&f_orig), wrap(&g_orig));
+        sumcheck_deg2_delayed_bn254(&mut f, &mut g, &challenges);
+        sumcheck_deg2_delayed_bn254_generic(&mut f_bf, &mut g_bf, &challenges_bf);
+        assert_eq!(unwrap_branch_free(f_bf), f);
+        assert_eq!(unwrap_branch_free(g_bf), g);
+
+        let (mut f, mut g) = (f_orig.clone(), g_orig.clone());
+        let (mut f_bf, mut g_bf) = (wrap(&f_orig), wrap(&g_orig));
+        sumcheck_deg2_projective_delayed_bn254(&mut f, &mut g, &challenges);
+        sumcheck_deg2_projective_delayed_bn254_generic(&mut f_bf, &mut g_bf, &challenges_bf);
+        assert_eq!(unwrap_branch_free(f_bf), f);
+        assert_eq!(unwrap_branch_free(g_bf), g);
+    }
+
+    #[test]
+    fn branch_free_eq_delayed_kernels_match_arkworks() {
+        let n = 6usize;
+        let f_orig = make_bn254(1usize << n);
+        let g_orig = make_bn254(1usize << n);
+        let challenges = make_bn254(n);
+        let eq_point = make_bn254(n);
+        let wrap = |values: &[BN254Fr]| -> Vec<Bn254BranchFree> {
+            values.iter().copied().map(Bn254BranchFree).collect()
+        };
+        let challenges_bf = wrap(&challenges);
+        let eq_point_bf = wrap(&eq_point);
+
+        let suffix_eq = build_suffix_eq_tables(&eq_point, BN254Fr::from(1u64));
+        let suffix_eq_bf = build_suffix_eq_tables(&eq_point_bf, Bn254BranchFree::ONE);
+        for (table_bf, table) in suffix_eq_bf.iter().zip(&suffix_eq) {
+            assert_eq!(&unwrap_branch_free(table_bf.clone()), table);
+        }
+        let (mut f, mut g) = (f_orig.clone(), g_orig.clone());
+        let (mut f_bf, mut g_bf) = (wrap(&f_orig), wrap(&g_orig));
+        sumcheck_deg2_eq_delayed_bn254(&mut f, &mut g, &suffix_eq, &challenges);
+        sumcheck_deg2_eq_delayed_bn254_generic(&mut f_bf, &mut g_bf, &suffix_eq_bf, &challenges_bf);
+        assert_eq!(unwrap_branch_free(f_bf), f);
+        assert_eq!(unwrap_branch_free(g_bf), g);
+
+        let suffix_eq = build_suffix_eq_tables_projective(&eq_point, BN254Fr::from(1u64));
+        let suffix_eq_bf = build_suffix_eq_tables_projective(&eq_point_bf, Bn254BranchFree::ONE);
+        for (table_bf, table) in suffix_eq_bf.iter().zip(&suffix_eq) {
+            assert_eq!(&unwrap_branch_free(table_bf.clone()), table);
+        }
+        let (mut f, mut g) = (f_orig.clone(), g_orig.clone());
+        let (mut f_bf, mut g_bf) = (wrap(&f_orig), wrap(&g_orig));
+        sumcheck_deg2_eq_projective_delayed_bn254(&mut f, &mut g, &suffix_eq, &challenges);
+        sumcheck_deg2_eq_projective_delayed_bn254_generic(
+            &mut f_bf,
+            &mut g_bf,
+            &suffix_eq_bf,
+            &challenges_bf,
+        );
+        assert_eq!(unwrap_branch_free(f_bf), f);
+        assert_eq!(unwrap_branch_free(g_bf), g);
     }
 }

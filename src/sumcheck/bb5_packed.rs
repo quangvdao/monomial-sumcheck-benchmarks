@@ -41,11 +41,11 @@ pub fn bb5_eq_gruen_projective_eval_ref(f: &[BB5], g: &[BB5], eq_rest: &[BB5]) -
         let g0 = g[2 * j];
         let gi = g[2 * j + 1];
         let ew = eq_rest[j];
-
-        q_inf += fi * gi * ew;
         let sf = f0 + fi;
         let sg = g0 + gi;
+
         q1 += sf * sg * ew;
+        q_inf += fi * gi * ew;
     }
 
     (q1, q_inf)
@@ -111,11 +111,11 @@ pub fn bb5_eq_projective_delayed_eval_ref(
         let g0 = g[2 * j];
         let gi = g[2 * j + 1];
         let ew = eq_rest[j];
-
-        q_inf.fmadd(fi * gi, ew);
         let sf = f0 + fi;
         let sg = g0 + gi;
+
         q1.fmadd(sf * sg, ew);
+        q_inf.fmadd(fi * gi, ew);
     }
 
     (q1, q_inf)
@@ -134,47 +134,6 @@ unsafe fn bb_neon_sum_mul_4(a: PackedBabyBearNeon, b: PackedBabyBearNeon) -> u12
 #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
 #[inline(always)]
 fn bb5_accum_fmadd_packed(acc: &mut BB5Accum, a: PackedBB5, b: PackedBB5) {
-    let a = a.as_basis_coefficients_slice();
-    let b = b.as_basis_coefficients_slice();
-    let a0 = a[0];
-    let a1 = a[1];
-    let a2 = a[2];
-    let a3 = a[3];
-    let a4 = a[4];
-    let b0 = b[0];
-    let b1 = b[1];
-    let b2 = b[2];
-    let b3 = b[3];
-    let b4 = b[4];
-
-    unsafe {
-        acc.c[0] += bb_neon_sum_mul_4(a0, b0);
-        acc.c[1] += bb_neon_sum_mul_4(a0, b1) + bb_neon_sum_mul_4(a1, b0);
-        acc.c[2] +=
-            bb_neon_sum_mul_4(a0, b2) + bb_neon_sum_mul_4(a1, b1) + bb_neon_sum_mul_4(a2, b0);
-        acc.c[3] += bb_neon_sum_mul_4(a0, b3)
-            + bb_neon_sum_mul_4(a1, b2)
-            + bb_neon_sum_mul_4(a2, b1)
-            + bb_neon_sum_mul_4(a3, b0);
-        acc.c[4] += bb_neon_sum_mul_4(a0, b4)
-            + bb_neon_sum_mul_4(a1, b3)
-            + bb_neon_sum_mul_4(a2, b2)
-            + bb_neon_sum_mul_4(a3, b1)
-            + bb_neon_sum_mul_4(a4, b0);
-        acc.c[5] += bb_neon_sum_mul_4(a1, b4)
-            + bb_neon_sum_mul_4(a2, b3)
-            + bb_neon_sum_mul_4(a3, b2)
-            + bb_neon_sum_mul_4(a4, b1);
-        acc.c[6] +=
-            bb_neon_sum_mul_4(a2, b4) + bb_neon_sum_mul_4(a3, b3) + bb_neon_sum_mul_4(a4, b2);
-        acc.c[7] += bb_neon_sum_mul_4(a3, b4) + bb_neon_sum_mul_4(a4, b3);
-        acc.c[8] += bb_neon_sum_mul_4(a4, b4);
-    }
-}
-
-#[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
-#[inline(never)]
-fn bb5_accum_fmadd_packed_outlined(acc: &mut BB5Accum, a: PackedBB5, b: PackedBB5) {
     let a = a.as_basis_coefficients_slice();
     let b = b.as_basis_coefficients_slice();
     let a0 = a[0];
@@ -308,8 +267,8 @@ pub fn bb5_eq_gruen_projective_eval_packed(f: &[BB5], g: &[BB5], eq_rest: &[BB5]
         let sf = f0 + fi;
         let sg = g0 + gi;
 
-        q_inf_packed += (fi * gi) * ew;
         q1_packed += (sf * sg) * ew;
+        q_inf_packed += (fi * gi) * ew;
     }
 
     for j in packed_end..half {
@@ -321,8 +280,8 @@ pub fn bb5_eq_gruen_projective_eval_packed(f: &[BB5], g: &[BB5], eq_rest: &[BB5]
         let sf = f0 + fi;
         let sg = g0 + gi;
 
-        q_inf_tail += fi * gi * ew;
         q1_tail += sf * sg * ew;
+        q_inf_tail += fi * gi * ew;
     }
 
     (
@@ -343,17 +302,16 @@ fn bb5_eq_projective_delayed_eval_packed(
     let mut q_inf = BB5Accum::zero();
 
     for j in (0..packed_end).step_by(BB5_PACK_WIDTH) {
-        let fi = pack_bb5_chunk(core::array::from_fn(|lane| f[2 * (j + lane) + 1]));
-        let gi = pack_bb5_chunk(core::array::from_fn(|lane| g[2 * (j + lane) + 1]));
-        let ew = PackedBB5::from_ext_slice(&eq_rest[j..j + BB5_PACK_WIDTH]);
-
-        bb5_accum_fmadd_packed(&mut q_inf, fi * gi, ew);
         let f0 = pack_bb5_chunk(core::array::from_fn(|lane| f[2 * (j + lane)]));
+        let fi = pack_bb5_chunk(core::array::from_fn(|lane| f[2 * (j + lane) + 1]));
         let g0 = pack_bb5_chunk(core::array::from_fn(|lane| g[2 * (j + lane)]));
+        let gi = pack_bb5_chunk(core::array::from_fn(|lane| g[2 * (j + lane) + 1]));
         let ew = PackedBB5::from_ext_slice(&eq_rest[j..j + BB5_PACK_WIDTH]);
         let sf = f0 + fi;
         let sg = g0 + gi;
-        bb5_accum_fmadd_packed_outlined(&mut q1, sf * sg, ew);
+
+        bb5_accum_fmadd_packed(&mut q1, sf * sg, ew);
+        bb5_accum_fmadd_packed(&mut q_inf, fi * gi, ew);
     }
 
     for j in packed_end..half {
@@ -381,6 +339,18 @@ pub fn bb5_eq_gruen_boolean_eval(f: &[BB5], g: &[BB5], eq_rest: &[BB5]) -> (BB5,
     #[cfg(not(all(target_arch = "aarch64", target_feature = "neon")))]
     {
         bb5_eq_gruen_boolean_eval_ref(f, g, eq_rest)
+    }
+}
+
+#[inline(always)]
+pub fn bb5_eq_gruen_projective_eval(f: &[BB5], g: &[BB5], eq_rest: &[BB5]) -> (BB5, BB5) {
+    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+    {
+        bb5_eq_gruen_projective_eval_packed(f, g, eq_rest)
+    }
+    #[cfg(not(all(target_arch = "aarch64", target_feature = "neon")))]
+    {
+        bb5_eq_gruen_projective_eval_ref(f, g, eq_rest)
     }
 }
 
@@ -484,10 +454,7 @@ pub fn sumcheck_deg2_eq_gruen_projective_bb5(
     for round in 0..n {
         let half = f.len() / 2;
         let eq_rest = &suffix_eq[round + 1];
-        #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
-        let (q1, q_inf) = bb5_eq_gruen_projective_eval_packed(f, g, eq_rest);
-        #[cfg(not(all(target_arch = "aarch64", target_feature = "neon")))]
-        let (q1, q_inf) = bb5_eq_gruen_projective_eval_ref(f, g, eq_rest);
+        let (q1, q_inf) = bb5_eq_gruen_projective_eval(f, g, eq_rest);
         let _ = black_box((q1, q_inf));
 
         let r = challenges[round];

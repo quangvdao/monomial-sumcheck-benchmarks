@@ -1,9 +1,10 @@
 #[cfg(target_arch = "aarch64")]
 use std::arch::aarch64::{
-    uint32x2_t, uint32x4_t, uint64x2_t, vaddq_u32, vaddq_u64, vaddvq_u64, vandq_u32, vcgtq_u32,
-    vcreate_u32, vdup_n_u32, vdupq_n_u32, vdupq_n_u64, veorq_u64, vget_high_u32, vget_low_u32,
-    vld1q_u32, vminq_u32, vmlal_lane_u32, vmull_high_u32, vmull_lane_u32, vmull_p64, vmull_u32,
-    vmulq_u32, vreinterpretq_u32_u64, vsubq_u32, vuzp1q_u32, vuzp2q_u32,
+    uint32x2_t, uint32x4_t, uint64x2_t, vaddq_u32, vaddq_u64, vaddvq_u64, vandq_u32, vandq_u64,
+    vcgtq_u32, vcreate_u32, vdup_n_u32, vdupq_n_u32, vdupq_n_u64, veorq_u64, vget_high_u32,
+    vget_low_u32, vld1q_u32, vminq_u32, vmlal_lane_u32, vmull_high_u32, vmull_lane_u32, vmull_p64,
+    vmull_u32, vmulq_u32, vreinterpretq_s64_u64, vreinterpretq_u32_u64, vreinterpretq_u64_s64,
+    vshrq_n_s64, vsubq_u32, vsubq_u64, vuzp1q_u32, vuzp2q_u32,
 };
 use std::ops::{Add, AddAssign, Mul, Sub};
 

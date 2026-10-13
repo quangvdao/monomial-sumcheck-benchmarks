@@ -8,6 +8,7 @@ import json
 import math
 import random
 import statistics
+import sys
 from pathlib import Path
 
 
@@ -51,6 +52,14 @@ def summarize_values(values: list[float]) -> dict[str, float | int]:
 def load_runs(root: Path) -> dict[str, dict[str, float]]:
     runs: dict[str, dict[str, float]] = {}
     for run_dir in sorted(root.glob("run-*")):
+        # The collector marks an aborted repetition with FAILED and writes
+        # benchmarks.json only after every case of a repetition has finished.
+        if (run_dir / "FAILED").exists() or not (run_dir / "benchmarks.json").exists():
+            print(
+                f"skipping failed or partial repetition {run_dir.name}",
+                file=sys.stderr,
+            )
+            continue
         values: dict[str, float] = {}
         criterion = run_dir / "criterion"
         for estimates_path in criterion.glob("**/new/estimates.json"):

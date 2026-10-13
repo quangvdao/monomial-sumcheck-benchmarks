@@ -5,18 +5,24 @@ kernels. They are not part of the benchmark methodology and are not independent
 evidence for a paper claim.
 
 On Apple M4 Max, semantically equivalent Rust source sometimes produced
-different register allocation and stack traffic. Three patterns were useful:
+different register allocation and stack traffic. Earlier revisions used three
+such patterns in the projective kernels only: accumulating the two terms in a
+different order from the Boolean kernel, routing one accumulator of the packed
+BabyBear Ext5 loop through a non-inlined helper, and packing the equality
+weights a second time instead of retaining them.
 
-- Naming intermediate sums shortened live ranges in several projective kernels.
-- Asymmetric inlining kept the packed BabyBear Ext5 loop compact.
-- Reloading packed equality weights was sometimes cheaper than retaining them
-  across the full accumulation.
+That asymmetric shaping has been removed. It gave the projective kernel a code
+shape that its Boolean baseline did not have, so the comparison measured the
+shaping together with the basis. Each projective kernel in `bb5_packed.rs` and
+`bb_ext.rs` is now a line-for-line mirror of its Boolean counterpart: the same
+loads, the same single packing of the equality weights, the same inlined
+accumulator helper, and the same accumulation order, differing only in sums
+versus differences. Both variants therefore share one code shape. Keep them
+mirrored when changing either.
 
-In one packed BabyBear Ext5 kernel, reordering the loop body reduced the compiled
-function from 5,996 to 5,436 bytes, the stack frame from `0x530` to `0x410`
-bytes, and the counted stack references from 385 to 248 under the compiler used
-at that time. These figures are compiler-specific diagnostics, not portable
-performance results. Recheck them whenever the pinned toolchain changes.
+The sizes of compiled functions and stack frames remain compiler-specific
+diagnostics, not portable performance results. Recheck them whenever the pinned
+toolchain changes.
 
 The algebraic operation counts do not depend on these choices. The accepted
 benchmark data must come from the independent-process procedure in

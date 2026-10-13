@@ -2,7 +2,7 @@ use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criteri
 
 use ark_bn254::Fr as BN254Fr;
 use ark_ff::AdditiveGroup;
-use monomial_sumcheck_benchmarks::{benchmark_config, lookup_tables::*};
+use monomial_sumcheck_benchmarks::{benchmark_config, lookup_tables::*, sumcheck::Bn254BranchFree};
 use p3_baby_bear::BabyBear;
 use p3_field::extension::BinomialExtensionField;
 use p3_field::PrimeCharacteristicRing;
@@ -21,6 +21,11 @@ fn make_u64s(n: usize) -> Vec<u64> {
 
 fn make_bn254_challenges(n: usize) -> Vec<BN254Fr> {
     make_u64s(n).iter().map(|&v| BN254Fr::from(v)).collect()
+}
+
+// The same challenges with branch-free addition and subtraction.
+fn to_branch_free(challenges: &[BN254Fr]) -> Vec<Bn254BranchFree> {
+    challenges.iter().copied().map(Bn254BranchFree).collect()
 }
 
 fn make_bb4_challenges(n: usize) -> Vec<BB4> {
@@ -49,6 +54,16 @@ fn bench_eq_table_build(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::new("BN254_projective", n), &n, |b, _| {
             b.iter(|| black_box(eq_evals_projective(black_box(&r_bn), BN254Fr::from(1u64))))
+        });
+
+        let r_bf = to_branch_free(&r_bn);
+
+        group.bench_with_input(BenchmarkId::new("BN254bf_boolean", n), &n, |b, _| {
+            b.iter(|| black_box(eq_evals_boolean(black_box(&r_bf), Bn254BranchFree::ONE)))
+        });
+
+        group.bench_with_input(BenchmarkId::new("BN254bf_projective", n), &n, |b, _| {
+            b.iter(|| black_box(eq_evals_projective(black_box(&r_bf), Bn254BranchFree::ONE)))
         });
     }
 
@@ -83,6 +98,22 @@ fn bench_lt_table_build(c: &mut Criterion) {
                     black_box(&r_bn),
                     BN254Fr::ZERO,
                     BN254Fr::from(1u64),
+                ))
+            })
+        });
+
+        let r_bf = to_branch_free(&r_bn);
+
+        group.bench_with_input(BenchmarkId::new("BN254bf_boolean", n), &n, |b, _| {
+            b.iter(|| black_box(lt_evals_boolean(black_box(&r_bf), Bn254BranchFree::ZERO)))
+        });
+
+        group.bench_with_input(BenchmarkId::new("BN254bf_projective", n), &n, |b, _| {
+            b.iter(|| {
+                black_box(lt_evals_projective(
+                    black_box(&r_bf),
+                    Bn254BranchFree::ZERO,
+                    Bn254BranchFree::ONE,
                 ))
             })
         });

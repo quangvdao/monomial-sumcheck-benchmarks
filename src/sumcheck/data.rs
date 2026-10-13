@@ -1,11 +1,23 @@
 use super::*;
 
+/// Pseudo-random words.  Every call draws from a different SplitMix64 stream,
+/// so two tables built by consecutive calls are independent.  (With one fixed
+/// seed, `f` and `g` were the same table: the data-dependent branches of
+/// arkworks' subtraction were then correlated between the two tables, which
+/// made the BN254 kernels about 15% faster than on independent inputs.)
+/// The streams are deterministic because the call order is.
 pub fn make_u64s(n: usize) -> Vec<u64> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static STREAM: AtomicU64 = AtomicU64::new(0);
+    let stream = STREAM.fetch_add(1, Ordering::Relaxed);
+    let mut state = 0xdeadbeef12345678u64 ^ stream.wrapping_mul(0xd1342543de82ef95);
     let mut vals = Vec::with_capacity(n);
-    let mut state: u64 = 0xdeadbeef12345678;
     for _ in 0..n {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        vals.push(state);
+        state = state.wrapping_add(0x9e3779b97f4a7c15);
+        let mut z = state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
+        vals.push(z ^ (z >> 31));
     }
     vals
 }
