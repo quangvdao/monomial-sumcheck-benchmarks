@@ -37,7 +37,7 @@ Git dependencies are fixed to exact revisions.
 | Crate | Source | Version or commit |
 |---|---|---|
 | `p3-baby-bear`, `p3-koala-bear`, `p3-field` | [Plonky3/Plonky3](https://github.com/Plonky3/Plonky3) | `b482e1be5f6d2e0917c5ecea3009335bbfd94e42` |
-| `hachi-pcs` | [LayerZero-Labs/hachi](https://github.com/LayerZero-Labs/hachi) | `7e81702c87bd7adb9caeb7cb5064d65e16f740ff` |
+| `jolt-field` (features `solinas`, `asm`) | [a16z/jolt](https://github.com/a16z/jolt) | `8b6099f70bb21c8d38abd32dc295d34786c1699a` |
 | `binius-field` | [binius-zk/binius64](https://github.com/binius-zk/binius64) | `6a69077efb40ee3d09e37e1c9f3511e2a9f75c99` |
 | `ark-bn254`, `ark-ff` | [crates.io arkworks](https://crates.io/crates/ark-ff) | `0.5` |
 

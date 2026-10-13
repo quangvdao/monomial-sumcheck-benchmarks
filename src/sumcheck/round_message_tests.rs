@@ -5,7 +5,7 @@
 
 use super::*;
 use binius_field::Field as _;
-use hachi_pcs::AdditiveGroup as _;
+use jolt_field::Zero as _;
 
 const N: usize = 8;
 
@@ -180,7 +180,7 @@ fn fp128_delayed_round_messages_match_eager() {
     let f = make_fp128(1 << N);
     let g = make_fp128(1 << N);
     let ch = make_fp128(N);
-    let zero = Fp128::ZERO;
+    let zero = Fp128::zero();
 
     let eager: Vec<(Fp128, Fp128, Fp128)> =
         messages(&f, &g, |f, g| sumcheck_deg2_boolean(f, g, &ch, zero));
@@ -217,7 +217,7 @@ fn fp128_eq_delayed_round_messages_match_eager() {
     let g = make_fp128(1 << N);
     let ch = make_fp128(N);
     let eq_point = make_fp128(N);
-    let zero = Fp128::ZERO;
+    let zero = Fp128::zero();
 
     let eq = build_suffix_eq_tables(&eq_point, Fp128::one());
     let eager: Vec<(Fp128, Fp128)> = messages(&f, &g, |f, g| {
@@ -282,7 +282,7 @@ fn direct_1inf_sum(
 ) -> Fp128 {
     let n = f.len().trailing_zeros() as usize;
     let rest = n - bound.len() - 1;
-    let mut sum = Fp128::ZERO;
+    let mut sum = Fp128::zero();
     for index in 0..1usize << rest {
         let mut point: Vec<Option<Fp128>> = bound.iter().copied().map(Some).collect();
         point.push(x);
@@ -303,7 +303,7 @@ fn fp128_1inf_round_messages_match_direct_summation() {
     let g = make_fp128(1 << n);
     let ch = make_fp128(n);
     let eq_point = make_fp128(n);
-    let (zero, one) = (Fp128::ZERO, Fp128::one());
+    let (zero, one) = (Fp128::zero(), Fp128::one());
 
     let got: Vec<(Fp128, Fp128, Fp128)> = messages(&f, &g, |f, g| {
         sumcheck_deg2_projective_1inf_fp128(f, g, &ch, zero)

@@ -14,8 +14,7 @@ pub use ark_bn254::Fr as BN254Fr;
 use ark_bn254::FrConfig;
 use ark_ff::{AdditiveGroup, MontConfig, PrimeField};
 pub use binius_field::BinaryField128bGhash as GF128;
-use hachi_pcs::algebra::Prime128Offset275;
-use hachi_pcs::{CanonicalField, FieldCore};
+use jolt_field::{CanonicalEncoding, Field as SolinasField, One, Prime128Offset275};
 use p3_baby_bear::BabyBear;
 #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
 use p3_baby_bear::PackedBabyBearNeon;

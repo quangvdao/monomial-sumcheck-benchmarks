@@ -1,7 +1,7 @@
 use ark_ff::AdditiveGroup as _;
 use binius_field::Field as _;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use hachi_pcs::{AdditiveGroup as _, FieldCore as _};
+use jolt_field::{One as _, Zero as _};
 use p3_field::PrimeCharacteristicRing as _;
 use rand::seq::SliceRandom;
 
@@ -781,7 +781,7 @@ fn bench_fp128(c: &mut Criterion) {
                                         &mut f,
                                         &mut g,
                                         &challenges,
-                                        Fp128::ZERO,
+                                        Fp128::zero(),
                                     );
                                 },
                                 criterion::BatchSize::LargeInput,
@@ -808,7 +808,7 @@ fn bench_fp128(c: &mut Criterion) {
                                         &mut f,
                                         &mut g,
                                         &challenges,
-                                        Fp128::ZERO,
+                                        Fp128::zero(),
                                     );
                                 },
                                 criterion::BatchSize::LargeInput,
@@ -827,7 +827,7 @@ fn bench_fp128(c: &mut Criterion) {
                                             &mut f,
                                             &mut g,
                                             &challenges,
-                                            Fp128::ZERO,
+                                            Fp128::zero(),
                                         );
                                     },
                                     criterion::BatchSize::LargeInput,
@@ -901,7 +901,7 @@ fn bench_fp128(c: &mut Criterion) {
                                         &mut g,
                                         &suffix_eq_boolean,
                                         &challenges,
-                                        Fp128::ZERO,
+                                        Fp128::zero(),
                                     );
                                 },
                                 criterion::BatchSize::LargeInput,
@@ -934,7 +934,7 @@ fn bench_fp128(c: &mut Criterion) {
                                         &mut g,
                                         &suffix_eq_projective,
                                         &challenges,
-                                        Fp128::ZERO,
+                                        Fp128::zero(),
                                     );
                                 },
                                 criterion::BatchSize::LargeInput,
@@ -954,7 +954,7 @@ fn bench_fp128(c: &mut Criterion) {
                                             &mut g,
                                             &suffix_eq_projective,
                                             &challenges,
-                                            Fp128::ZERO,
+                                            Fp128::zero(),
                                         );
                                     },
                                     criterion::BatchSize::LargeInput,

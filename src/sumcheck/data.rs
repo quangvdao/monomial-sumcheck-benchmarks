@@ -73,7 +73,7 @@ pub fn make_fp128(n: usize) -> Vec<Fp128> {
     raw.chunks(2)
         .map(|chunk| {
             let v = (chunk[0] as u128) | ((chunk[1] as u128) << 64);
-            Fp128::from_canonical_u128_reduced(v)
+            Fp128::from_u128_reduced(v)
         })
         .collect()
 }

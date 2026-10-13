@@ -8,8 +8,7 @@ use binius_field::BinaryField128bGhash;
 use binius_field::Field as BiniusField;
 use binius_field::PackedBinaryGhash1x128b as GF128Packed;
 use binius_field::PackedField as BiniusPackedField;
-use hachi_pcs::algebra::{Fp128Packing, PackedField, PackedValue, Prime128Offset275};
-use hachi_pcs::{AdditiveGroup as HachiAdditiveGroup, CanonicalField, FieldCore};
+use jolt_field::{CanonicalEncoding, Fp128Packing, One, Packed, Prime128Offset275, Zero};
 use monomial_sumcheck_benchmarks::benchmark_config;
 use p3_baby_bear::BabyBear;
 use p3_field::extension::{BinomialExtensionField, QuinticTrinomialExtensionField};
@@ -176,7 +175,7 @@ fn make_kb5(n: usize) -> Vec<KB5> {
 fn make_fp128(n: usize) -> Vec<Prime128Offset275> {
     let mut r = rng();
     (0..n)
-        .map(|_| Prime128Offset275::from_canonical_u128_reduced(r.gen::<u128>()))
+        .map(|_| Prime128Offset275::from_u128_reduced(r.gen::<u128>()))
         .collect()
 }
 
@@ -257,8 +256,8 @@ fn bench_fp128(c: &mut Criterion) {
     let a = make_fp128(N);
     let name = "Fp128";
 
-    lat_add(name, F::ZERO, &a, c);
-    lat_sub(name, F::ZERO, &a, c);
+    lat_add(name, F::zero(), &a, c);
+    lat_sub(name, F::zero(), &a, c);
     lat_mul(name, F::one(), &a, c);
     thr_add::<_, 16>(name, &a, c);
     thr_sub::<_, 16>(name, &a, c);
@@ -267,7 +266,7 @@ fn bench_fp128(c: &mut Criterion) {
 
 fn bench_fp128_packed(c: &mut Criterion) {
     let a = make_fp128_packed(N);
-    let zero = PackedFp128::broadcast(Prime128Offset275::ZERO);
+    let zero = PackedFp128::broadcast(Prime128Offset275::zero());
     let one = PackedFp128::broadcast(Prime128Offset275::one());
     let name = "Fp128_Packed";
 

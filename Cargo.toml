@@ -13,8 +13,10 @@ p3-koala-bear = { git = "https://github.com/Plonky3/Plonky3.git", rev = "b482e1b
 p3-field = { git = "https://github.com/Plonky3/Plonky3.git", rev = "b482e1be5f6d2e0917c5ecea3009335bbfd94e42" }
 
 # 128-bit prime field (p = 2^128 - 275)
-# Exact hachi revision containing the Fp128 arithmetic used by these benchmarks.
-hachi-pcs = { git = "https://github.com/LayerZero-Labs/hachi.git", rev = "7e81702c87bd7adb9caeb7cb5064d65e16f740ff", default-features = false }
+# Exact jolt revision containing the Fp128 arithmetic used by these benchmarks.
+# `asm` selects the AArch64 and x86-64 assembly kernels for Fp128 add, sub,
+# mul and mul_add; without it jolt-field falls back to portable Rust.
+jolt-field = { git = "https://github.com/a16z/jolt", rev = "8b6099f70bb21c8d38abd32dc295d34786c1699a", default-features = false, features = ["solinas", "asm"] }
 
 # GF(2^128) GHASH field
 binius-field = { git = "https://github.com/binius-zk/binius64", rev = "6a69077efb40ee3d09e37e1c9f3511e2a9f75c99" }
