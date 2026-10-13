@@ -394,7 +394,7 @@ pub fn sumcheck_deg2_eq_gruen_boolean_bb5(
         let half = f.len() / 2;
         let eq_rest = &suffix_eq[round + 1];
         let (q1, q_inf) = bb5_eq_gruen_boolean_eval(f, g, eq_rest);
-        let _ = black_box((q1, q_inf));
+        round_message((q1, q_inf));
 
         let r = challenges[round];
         for j in 0..half {
@@ -425,7 +425,7 @@ pub fn sumcheck_deg2_eq_delayed_bb5_packed(
         let half = f.len() / 2;
         let eq_rest = &suffix_eq[round + 1];
         let (q1, q_inf) = bb5_eq_delayed_eval(f, g, eq_rest);
-        let _ = black_box((q1.reduce(), q_inf.reduce()));
+        round_message((q1.reduce(), q_inf.reduce()));
 
         let r = challenges[round];
         let mul_r = BB5MulByConst::new(r);
@@ -455,7 +455,7 @@ pub fn sumcheck_deg2_eq_gruen_projective_bb5(
         let half = f.len() / 2;
         let eq_rest = &suffix_eq[round + 1];
         let (q1, q_inf) = bb5_eq_gruen_projective_eval(f, g, eq_rest);
-        let _ = black_box((q1, q_inf));
+        round_message((q1, q_inf));
 
         let r = challenges[round];
         for j in 0..half {
@@ -486,7 +486,7 @@ pub fn sumcheck_deg2_eq_projective_delayed_bb5_packed(
         let half = f.len() / 2;
         let eq_rest = &suffix_eq[round + 1];
         let (q1, q_inf) = bb5_eq_projective_delayed_eval(f, g, eq_rest);
-        let _ = black_box((q1.reduce(), q_inf.reduce()));
+        round_message((q1.reduce(), q_inf.reduce()));
 
         let r = challenges[round];
         let mul_r = BB5MulByConst::new(r);

@@ -2,20 +2,12 @@ use super::*;
 
 const BN254_MODULUS: [u64; 4] = <FrConfig as MontConfig<4>>::MODULUS.0;
 const BN254_INV: u64 = <FrConfig as MontConfig<4>>::INV;
-const BN254_R2: [u64; 4] = <FrConfig as MontConfig<4>>::R2.0;
 
 #[inline(always)]
 fn mac_carry(a: u64, b: u64, c: u64, carry: &mut u64) -> u64 {
     let tmp = (a as u128) + (b as u128) * (c as u128) + (*carry as u128);
     *carry = (tmp >> 64) as u64;
     tmp as u64
-}
-
-#[inline(always)]
-fn adc(a: &mut u64, b: u64, carry: u64) -> u64 {
-    let tmp = (*a as u128) + (b as u128) + (carry as u128);
-    *a = tmp as u64;
-    (tmp >> 64) as u64
 }
 
 #[inline(always)]
@@ -59,30 +51,7 @@ fn bn254_from_limbs(limbs: [u64; 4]) -> BN254Fr {
     unsafe { std::mem::transmute(limbs) }
 }
 
-fn montgomery_reduce_8(t: &[u64; 8]) -> BN254Fr {
-    let mut buf = *t;
-    let mut carry2 = 0u64;
-    for i in 0..4 {
-        let m = buf[i].wrapping_mul(BN254_INV);
-        let mut carry = 0u64;
-        let _ = mac_carry(buf[i], m, BN254_MODULUS[0], &mut carry);
-        for j in 1..4 {
-            buf[i + j] = mac_carry(buf[i + j], m, BN254_MODULUS[j], &mut carry);
-        }
-        carry2 = adc(&mut buf[i + 4], carry, carry2);
-    }
-    let mut result = [buf[4], buf[5], buf[6], buf[7]];
-    let needs_sub = if BN254_MODULUS[3] >> 63 == 0 {
-        cmp4(result, BN254_MODULUS) != std::cmp::Ordering::Less
-    } else {
-        carry2 != 0 || cmp4(result, BN254_MODULUS) != std::cmp::Ordering::Less
-    };
-    if needs_sub {
-        result = sub4(result, BN254_MODULUS);
-    }
-    bn254_from_limbs(result)
-}
-
+/// Unreduced sum of products of raw Montgomery residues.
 struct BN254Accum([u128; 8]);
 
 impl BN254Accum {
@@ -104,26 +73,26 @@ impl BN254Accum {
         }
     }
 
+    /// Reduce the accumulated integer `T` to the sum of the products.
+    ///
+    /// Each product of raw residues `aR * bR` stands for the element with raw
+    /// residue `abR`, so the result has raw residue `T / R mod p`, that is,
+    /// standard value `T * R^-2 mod p` with `R = 2^256`. This runs three times
+    /// per round, so it uses plain arkworks arithmetic and is not optimized.
     fn reduce(self) -> BN254Fr {
-        let mut limbs = [0u64; 9];
+        // Propagate carries. `T` is below `2^23 * p^2`, so nine limbs hold it.
+        let mut bytes = [0u8; 72];
         let mut carry: u128 = 0;
         for i in 0..8 {
             let sum = self.0[i] + carry;
-            limbs[i] = sum as u64;
+            bytes[8 * i..8 * i + 8].copy_from_slice(&(sum as u64).to_le_bytes());
             carry = sum >> 64;
         }
-        limbs[8] = carry as u64;
+        bytes[64..].copy_from_slice(&(carry as u64).to_le_bytes());
 
-        let mut buf = [0u64; 8];
-        buf.copy_from_slice(&limbs[..8]);
-        let result = montgomery_reduce_8(&buf);
-
-        if limbs[8] != 0 {
-            let r_field = bn254_from_limbs(BN254_R2);
-            result + BN254Fr::from(limbs[8]) * r_field
-        } else {
-            result
-        }
+        // The element with raw residue 1 has standard value `R^-1`.
+        let r_inv = bn254_from_limbs([1, 0, 0, 0]);
+        BN254Fr::from_le_bytes_mod_order(&bytes) * r_inv * r_inv
     }
 }
 
@@ -238,7 +207,7 @@ pub fn make_bn254_branch_free(n: usize) -> Vec<Bn254BranchFree> {
 
 /// A BN254 element representation accepted by the generic delayed kernels.
 pub trait Bn254Element:
-    Copy + Add<Output = Self> + AddAssign + Sub<Output = Self> + Mul<Output = Self>
+    Copy + Add<Output = Self> + AddAssign + Sub<Output = Self> + Mul<Output = Self> + 'static
 {
     fn to_fr(self) -> BN254Fr;
 }
@@ -323,7 +292,7 @@ pub fn sumcheck_deg2_delayed_bn254(
             h_inf.fmadd(df, dg);
         }
 
-        black_box((h0.reduce(), h1.reduce(), h_inf.reduce()));
+        round_message((h0.reduce(), h1.reduce(), h_inf.reduce()));
 
         let r = challenges[round];
         for j in 0..half {
@@ -366,7 +335,7 @@ pub fn sumcheck_deg2_eq_delayed_bn254(
             q_inf.fmadd(df * dg, ew);
         }
 
-        black_box((q1.reduce(), q_inf.reduce()));
+        round_message((q1.reduce(), q_inf.reduce()));
 
         let r = challenges[round];
         for j in 0..half {
@@ -407,7 +376,7 @@ pub fn sumcheck_deg2_projective_delayed_bn254(
             h_inf.fmadd(fi, gi);
         }
 
-        black_box((h0.reduce(), h1.reduce(), h_inf.reduce()));
+        round_message((h0.reduce(), h1.reduce(), h_inf.reduce()));
 
         let r = challenges[round];
         for j in 0..half {
@@ -450,7 +419,7 @@ pub fn sumcheck_deg2_eq_projective_delayed_bn254(
             q_inf.fmadd(fi * gi, ew);
         }
 
-        black_box((q1.reduce(), q_inf.reduce()));
+        round_message((q1.reduce(), q_inf.reduce()));
 
         let r = challenges[round];
         for j in 0..half {
@@ -495,7 +464,7 @@ pub fn sumcheck_deg2_delayed_bn254_generic<F: Bn254Element>(
             h_inf.fmadd(df.to_fr(), dg.to_fr());
         }
 
-        black_box((h0.reduce(), h1.reduce(), h_inf.reduce()));
+        round_message((h0.reduce(), h1.reduce(), h_inf.reduce()));
 
         let r = challenges[round];
         for j in 0..half {
@@ -538,7 +507,7 @@ pub fn sumcheck_deg2_eq_delayed_bn254_generic<F: Bn254Element>(
             q_inf.fmadd((df * dg).to_fr(), ew.to_fr());
         }
 
-        black_box((q1.reduce(), q_inf.reduce()));
+        round_message((q1.reduce(), q_inf.reduce()));
 
         let r = challenges[round];
         for j in 0..half {
@@ -579,7 +548,7 @@ pub fn sumcheck_deg2_projective_delayed_bn254_generic<F: Bn254Element>(
             h_inf.fmadd(fi.to_fr(), gi.to_fr());
         }
 
-        black_box((h0.reduce(), h1.reduce(), h_inf.reduce()));
+        round_message((h0.reduce(), h1.reduce(), h_inf.reduce()));
 
         let r = challenges[round];
         for j in 0..half {
@@ -622,7 +591,7 @@ pub fn sumcheck_deg2_eq_projective_delayed_bn254_generic<F: Bn254Element>(
             q_inf.fmadd((fi * gi).to_fr(), ew.to_fr());
         }
 
-        black_box((q1.reduce(), q_inf.reduce()));
+        round_message((q1.reduce(), q_inf.reduce()));
 
         let r = challenges[round];
         for j in 0..half {
@@ -663,7 +632,7 @@ pub fn sumcheck_deg2_boolean_bn254_upper(
             h_inf += df * dg;
         }
 
-        black_box((h0, h1, h_inf));
+        round_message((h0, h1, h_inf));
 
         let (r_lo, r_hi) = challenge_limbs[round];
         for j in 0..half {
@@ -704,7 +673,7 @@ pub fn sumcheck_deg2_projective_bn254_upper(
             h1 += (f0 + fi) * (g0 + gi);
         }
 
-        black_box((h0, h1, h_inf));
+        round_message((h0, h1, h_inf));
 
         let (r_lo, r_hi) = challenge_limbs[round];
         for j in 0..half {
@@ -749,7 +718,7 @@ pub fn sumcheck_deg2_eq_gruen_boolean_bn254_upper(
             q_inf += df * dg * ew;
         }
 
-        black_box((q1, q_inf));
+        round_message((q1, q_inf));
 
         let (r_lo, r_hi) = challenge_limbs[round];
         for j in 0..half {
@@ -792,7 +761,7 @@ pub fn sumcheck_deg2_eq_gruen_projective_bn254_upper(
             q_inf += fi * gi * ew;
         }
 
-        black_box((q1, q_inf));
+        round_message((q1, q_inf));
 
         let (r_lo, r_hi) = challenge_limbs[round];
         for j in 0..half {
@@ -835,7 +804,7 @@ pub fn sumcheck_deg2_delayed_bn254_upper(
             h_inf.fmadd(df, dg);
         }
 
-        black_box((h0.reduce(), h1.reduce(), h_inf.reduce()));
+        round_message((h0.reduce(), h1.reduce(), h_inf.reduce()));
 
         let (r_lo, r_hi) = challenge_limbs[round];
         for j in 0..half {
@@ -877,7 +846,7 @@ pub fn sumcheck_deg2_projective_delayed_bn254_upper(
             h_inf.fmadd(fi, gi);
         }
 
-        black_box((h0.reduce(), h1.reduce(), h_inf.reduce()));
+        round_message((h0.reduce(), h1.reduce(), h_inf.reduce()));
 
         let (r_lo, r_hi) = challenge_limbs[round];
         for j in 0..half {
@@ -921,7 +890,7 @@ pub fn sumcheck_deg2_eq_delayed_bn254_upper(
             q_inf.fmadd(df * dg, ew);
         }
 
-        black_box((q1.reduce(), q_inf.reduce()));
+        round_message((q1.reduce(), q_inf.reduce()));
 
         let (r_lo, r_hi) = challenge_limbs[round];
         for j in 0..half {
@@ -965,7 +934,7 @@ pub fn sumcheck_deg2_eq_projective_delayed_bn254_upper(
             q_inf.fmadd(fi * gi, ew);
         }
 
-        black_box((q1.reduce(), q_inf.reduce()));
+        round_message((q1.reduce(), q_inf.reduce()));
 
         let (r_lo, r_hi) = challenge_limbs[round];
         for j in 0..half {
@@ -1010,6 +979,50 @@ mod tests {
             }
         }
     }
+    // The delayed sum of the products against arkworks' eager accumulation.
+    fn assert_accumulated_sum_matches_eager(a: &[BN254Fr], b: &[BN254Fr]) {
+        let mut delayed = BN254Accum::zero();
+        let mut eager = BN254Fr::ZERO;
+        for (&x, &y) in a.iter().zip(b) {
+            delayed.fmadd(x, y);
+            eager += x * y;
+        }
+        assert_eq!(delayed.reduce(), eager, "{} products", a.len());
+    }
+
+    #[test]
+    fn accumulator_reduce_matches_eager_at_max_raw_operand() {
+        // p - 1 as a raw Montgomery residue, the largest canonical limbs.
+        let max = bn254_from_limbs(sub4(BN254_MODULUS, [1, 0, 0, 0]));
+        for count in [
+            1usize,
+            2,
+            3,
+            15,
+            16,
+            24,
+            25,
+            31,
+            32,
+            33,
+            1000,
+            1 << 10,
+            1 << 19,
+        ] {
+            let operands = vec![max; count];
+            assert_accumulated_sum_matches_eager(&operands, &operands);
+        }
+    }
+
+    #[test]
+    fn accumulator_reduce_matches_eager_on_random_products() {
+        for count in [1usize << 10, 1 << 19] {
+            let a = make_bn254(count);
+            let b = make_bn254(count);
+            assert_accumulated_sum_matches_eager(&a, &b);
+        }
+    }
+
     #[test]
     fn branch_free_add_sub_match_arkworks() {
         let mut values = vec![

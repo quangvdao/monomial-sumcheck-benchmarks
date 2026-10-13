@@ -109,7 +109,7 @@ pub fn sumcheck_deg2_delayed_gf128(f: &mut Vec<GF128>, g: &mut Vec<GF128>, chall
             h_inf.fmadd(df, dg);
         }
 
-        black_box((h0.reduce(), h1.reduce(), h_inf.reduce()));
+        round_message((h0.reduce(), h1.reduce(), h_inf.reduce()));
 
         let r = challenges[round];
         for j in 0..half {
@@ -152,7 +152,7 @@ pub fn sumcheck_deg2_eq_delayed_gf128(
             q_inf.fmadd(df * dg, ew);
         }
 
-        black_box((q1.reduce(), q_inf.reduce()));
+        round_message((q1.reduce(), q_inf.reduce()));
 
         let r = challenges[round];
         for j in 0..half {
@@ -193,7 +193,7 @@ pub fn sumcheck_deg2_projective_delayed_gf128(
             h1.fmadd(sf, sg);
         }
 
-        black_box((h0.reduce(), h1.reduce(), h_inf.reduce()));
+        round_message((h0.reduce(), h1.reduce(), h_inf.reduce()));
 
         let r = challenges[round];
         for j in 0..half {
@@ -236,7 +236,7 @@ pub fn sumcheck_deg2_eq_projective_delayed_gf128(
             q1.fmadd(sf * sg, ew);
         }
 
-        black_box((q1.reduce(), q_inf.reduce()));
+        round_message((q1.reduce(), q_inf.reduce()));
 
         let r = challenges[round];
         for j in 0..half {

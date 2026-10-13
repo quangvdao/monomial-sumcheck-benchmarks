@@ -2,7 +2,11 @@ use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criteri
 
 use ark_bn254::Fr as BN254Fr;
 use ark_ff::AdditiveGroup;
-use monomial_sumcheck_benchmarks::{benchmark_config, lookup_tables::*, sumcheck::Bn254BranchFree};
+use monomial_sumcheck_benchmarks::{
+    benchmark_config,
+    lookup_tables::*,
+    sumcheck::{make_bn254, Bn254BranchFree},
+};
 use p3_baby_bear::BabyBear;
 use p3_field::extension::BinomialExtensionField;
 use p3_field::PrimeCharacteristicRing;
@@ -17,10 +21,6 @@ fn make_u64s(n: usize) -> Vec<u64> {
         vals.push(state);
     }
     vals
-}
-
-fn make_bn254_challenges(n: usize) -> Vec<BN254Fr> {
-    make_u64s(n).iter().map(|&v| BN254Fr::from(v)).collect()
 }
 
 // The same challenges with branch-free addition and subtraction.
@@ -46,7 +46,7 @@ fn bench_eq_table_build(c: &mut Criterion) {
     let mut group = c.benchmark_group("eq_table_build");
 
     for n in [16, 20, 24] {
-        let r_bn = make_bn254_challenges(n);
+        let r_bn = make_bn254(n);
 
         group.bench_with_input(BenchmarkId::new("BN254_boolean", n), &n, |b, _| {
             b.iter(|| black_box(eq_evals_boolean(black_box(&r_bn), BN254Fr::from(1u64))))
@@ -86,7 +86,7 @@ fn bench_lt_table_build(c: &mut Criterion) {
     let mut group = c.benchmark_group("lt_table_build");
 
     for n in [16, 20, 24] {
-        let r_bn = make_bn254_challenges(n);
+        let r_bn = make_bn254(n);
 
         group.bench_with_input(BenchmarkId::new("BN254_boolean", n), &n, |b, _| {
             b.iter(|| black_box(lt_evals_boolean(black_box(&r_bn), BN254Fr::ZERO)))
@@ -142,8 +142,8 @@ fn bench_eq_mle(c: &mut Criterion) {
     let mut group = c.benchmark_group("eq_mle");
 
     for w in [8, 32] {
-        let x_bn = make_bn254_challenges(w);
-        let y_bn = make_bn254_challenges(w);
+        let x_bn = make_bn254(w);
+        let y_bn = make_bn254(w);
 
         group.bench_with_input(BenchmarkId::new("BN254_boolean", w), &w, |b, _| {
             b.iter(|| {
@@ -192,8 +192,8 @@ fn bench_lt_mle(c: &mut Criterion) {
     let mut group = c.benchmark_group("lt_mle");
 
     for w in [8, 32] {
-        let x_bn = make_bn254_challenges(w);
-        let y_bn = make_bn254_challenges(w);
+        let x_bn = make_bn254(w);
+        let y_bn = make_bn254(w);
 
         group.bench_with_input(BenchmarkId::new("BN254_boolean", w), &w, |b, _| {
             b.iter(|| {

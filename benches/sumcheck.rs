@@ -777,7 +777,12 @@ fn bench_fp128(c: &mut Criterion) {
                             b.iter_batched(
                                 || (f_orig.clone(), g_orig.clone()),
                                 |(mut f, mut g)| {
-                                    sumcheck_deg2_boolean(&mut f, &mut g, &challenges, Fp128::ZERO);
+                                    sumcheck_deg2_boolean_fp128(
+                                        &mut f,
+                                        &mut g,
+                                        &challenges,
+                                        Fp128::ZERO,
+                                    );
                                 },
                                 criterion::BatchSize::LargeInput,
                             )
@@ -881,13 +886,6 @@ fn bench_fp128(c: &mut Criterion) {
             let eq_point = make_fp128(n_usize);
             let suffix_eq_boolean = build_suffix_eq_tables(&eq_point, Fp128::one());
             let suffix_eq_projective = build_suffix_eq_tables_projective(&eq_point, Fp128::one());
-            let initial_claim_1inf = init_sumcheck_deg2_eq_gruen_projective_1inf_fp128_claim(
-                &f_orig,
-                &g_orig,
-                &suffix_eq_projective,
-                &eq_point,
-                Fp128::ZERO,
-            );
 
             let mut order = [0usize, 1, 2, 3, 4, 5];
             order.shuffle(&mut rand::thread_rng());
@@ -898,7 +896,7 @@ fn bench_fp128(c: &mut Criterion) {
                             b.iter_batched(
                                 || (f_orig.clone(), g_orig.clone()),
                                 |(mut f, mut g)| {
-                                    sumcheck_deg2_eq_gruen_boolean(
+                                    sumcheck_deg2_eq_gruen_boolean_fp128(
                                         &mut f,
                                         &mut g,
                                         &suffix_eq_boolean,
@@ -955,9 +953,7 @@ fn bench_fp128(c: &mut Criterion) {
                                             &mut f,
                                             &mut g,
                                             &suffix_eq_projective,
-                                            &eq_point,
                                             &challenges,
-                                            initial_claim_1inf,
                                             Fp128::ZERO,
                                         );
                                     },
@@ -994,9 +990,7 @@ fn bench_fp128(c: &mut Criterion) {
                                             &mut f,
                                             &mut g,
                                             &suffix_eq_projective,
-                                            &eq_point,
                                             &challenges,
-                                            initial_claim_1inf,
                                         );
                                     },
                                     criterion::BatchSize::LargeInput,

@@ -498,7 +498,7 @@ macro_rules! delayed_sumcheck_fns {
                         h1.fmadd(f1, g1);
                         h_inf.fmadd(df, dg);
                     }
-                    let _ = black_box((h0.reduce(), h1.reduce(), h_inf.reduce()));
+                    round_message((h0.reduce(), h1.reduce(), h_inf.reduce()));
                     let r = challenges[round];
                     let mul_r = <$mul_by_const>::new(r);
                     for j in 0..half {
@@ -538,7 +538,7 @@ macro_rules! delayed_sumcheck_fns {
                         q1.fmadd(f1 * g1, ew);
                         q_inf.fmadd(df * dg, ew);
                     }
-                    let _ = black_box((q1.reduce(), q_inf.reduce()));
+                    round_message((q1.reduce(), q_inf.reduce()));
                     let r = challenges[round];
                     let mul_r = <$mul_by_const>::new(r);
                     for j in 0..half {
@@ -575,7 +575,7 @@ macro_rules! delayed_sumcheck_fns {
                         h1.fmadd(sf, sg);
                         h_inf.fmadd(fi, gi);
                     }
-                    let _ = black_box((h0.reduce(), h1.reduce(), h_inf.reduce()));
+                    round_message((h0.reduce(), h1.reduce(), h_inf.reduce()));
                     let r = challenges[round];
                     let mul_r = <$mul_by_const>::new(r);
                     for j in 0..half {
@@ -615,7 +615,7 @@ macro_rules! delayed_sumcheck_fns {
                         q1.fmadd(sf * sg, ew);
                         q_inf.fmadd(fi * gi, ew);
                     }
-                    let _ = black_box((q1.reduce(), q_inf.reduce()));
+                    round_message((q1.reduce(), q_inf.reduce()));
                     let r = challenges[round];
                     let mul_r = <$mul_by_const>::new(r);
                     for j in 0..half {

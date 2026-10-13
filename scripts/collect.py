@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import os
 import platform
@@ -44,8 +45,22 @@ def load_snapshot() -> dict[str, object]:
     }
 
 
+def source_identity() -> dict[str, str]:
+    """Identify the source tree that a fresh Cargo process would build."""
+    return {
+        "git_commit": capture(["git", "rev-parse", "HEAD"]),
+        "git_status": capture(["git", "status", "--short"]),
+        "git_diff_sha256": hashlib.sha256(
+            capture(["git", "diff", "HEAD"]).encode()
+        ).hexdigest(),
+    }
+
+
 def machine_manifest(
-    commands: list[list[str]], repetitions: int, initial_load: dict[str, object]
+    commands: list[list[str]],
+    args: argparse.Namespace,
+    initial_load: dict[str, object],
+    source: dict[str, str],
 ) -> dict[str, object]:
     cpu = ""
     if platform.system() == "Darwin":
@@ -54,14 +69,21 @@ def machine_manifest(
         cpu = capture(["lscpu"])
 
     return {
-        "schema": 2,
+        "schema": 3,
         "created_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "collector_argv": sys.argv,
         "commands": commands,
-        "repetitions": repetitions,
-        "pairing": "one fresh cargo process per case; cyclically balanced case order",
+        "repetitions": args.repetitions,
+        "pairing": (
+            "one fresh cargo process per case; cyclically balanced case order"
+            if args.case
+            else "exploratory: one cargo process runs every case the filter matches"
+        ),
+        "max_load_per_cpu": args.max_load_per_cpu,
+        "allow_busy": args.allow_busy,
+        "allow_dirty": args.allow_dirty,
         "initial_load": initial_load,
-        "git_commit": capture(["git", "rev-parse", "HEAD"]),
-        "git_status": capture(["git", "status", "--short"]),
+        **source,
         "rustc": capture(["rustc", "-vV"]),
         "cargo": capture(["cargo", "-V"]),
         "python": sys.version,
@@ -71,6 +93,7 @@ def machine_manifest(
         "cpu": cpu,
         "cargo_target_dir": os.environ.get("CARGO_TARGET_DIR", "target"),
         "rustflags": os.environ.get("RUSTFLAGS", ""),
+        "cargo_encoded_rustflags": os.environ.get("CARGO_ENCODED_RUSTFLAGS", ""),
     }
 
 
@@ -132,8 +155,8 @@ def main() -> int:
         raise SystemExit("--repetitions must be positive")
     if args.max_load_per_cpu <= 0:
         raise SystemExit("--max-load-per-cpu must be positive")
-    dirty_status = capture(["git", "status", "--short"])
-    if dirty_status and not args.allow_dirty:
+    source = source_identity()
+    if source["git_status"] and not args.allow_dirty:
         raise SystemExit(
             "refusing to collect paper data from a dirty tree; commit the benchmark "
             "revision or pass --allow-dirty for a non-publishable smoke test"
@@ -166,7 +189,7 @@ def main() -> int:
         for criterion_filter in filters
     ]
     (output / "manifest.json").write_text(
-        json.dumps(machine_manifest(commands, args.repetitions, initial_load), indent=2)
+        json.dumps(machine_manifest(commands, args, initial_load, source), indent=2)
         + "\n"
     )
 
@@ -178,6 +201,17 @@ def main() -> int:
     for index in range(1, args.repetitions + 1):
         run_dir = output / f"run-{index:02d}"
         run_dir.mkdir()
+        # Every case is built by a fresh Cargo process, so a source change
+        # would silently mix binaries under one manifest.
+        if source_identity() != source:
+            (run_dir / "FAILED").write_text(
+                "source tree changed since the manifest was written\n"
+            )
+            print(
+                f"source tree changed before repetition {index}; see {run_dir}",
+                file=sys.stderr,
+            )
+            return 4
         offset = (index - 1) % len(commands)
         ordered_commands = commands[offset:] + commands[:offset]
         (run_dir / "command-order.json").write_text(
@@ -248,6 +282,20 @@ def main() -> int:
                     file=sys.stderr,
                 )
                 return result.returncode
+            if (
+                float(after_load["load_1m_per_logical_cpu"]) > args.max_load_per_cpu
+                and not args.allow_busy
+            ):
+                (run_dir / "FAILED").write_text(
+                    "host load exceeded the configured threshold after "
+                    f"case {case_index}\n"
+                )
+                print(
+                    f"host became busy during repetition {index}, case {case_index}; "
+                    f"see {run_dir}",
+                    file=sys.stderr,
+                )
+                return 3
 
             fresh = copy_fresh_criterion_results(criterion_root, run_dir, started_ns)
             if not fresh:

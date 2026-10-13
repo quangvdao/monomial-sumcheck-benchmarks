@@ -7,23 +7,38 @@ use super::*;
 /// made the BN254 kernels about 15% faster than on independent inputs.)
 /// The streams are deterministic because the call order is.
 pub fn make_u64s(n: usize) -> Vec<u64> {
+    let mut state = new_stream();
+    (0..n).map(|_| next_u64(&mut state)).collect()
+}
+
+fn new_stream() -> u64 {
     use std::sync::atomic::{AtomicU64, Ordering};
     static STREAM: AtomicU64 = AtomicU64::new(0);
     let stream = STREAM.fetch_add(1, Ordering::Relaxed);
-    let mut state = 0xdeadbeef12345678u64 ^ stream.wrapping_mul(0xd1342543de82ef95);
-    let mut vals = Vec::with_capacity(n);
-    for _ in 0..n {
-        state = state.wrapping_add(0x9e3779b97f4a7c15);
-        let mut z = state;
-        z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
-        vals.push(z ^ (z >> 31));
-    }
-    vals
+    0xdeadbeef12345678u64 ^ stream.wrapping_mul(0xd1342543de82ef95)
 }
 
+fn next_u64(state: &mut u64) -> u64 {
+    *state = state.wrapping_add(0x9e3779b97f4a7c15);
+    let mut z = *state;
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
+    z ^ (z >> 31)
+}
+
+/// Full-field elements: 256 pseudo-random bits reduced modulo the field
+/// order, one stream per call.
 pub fn make_bn254(n: usize) -> Vec<BN254Fr> {
-    make_u64s(n).iter().map(|&v| BN254Fr::from(v)).collect()
+    let mut state = new_stream();
+    (0..n)
+        .map(|_| {
+            let mut bytes = [0u8; 32];
+            for word in bytes.chunks_exact_mut(8) {
+                word.copy_from_slice(&next_u64(&mut state).to_le_bytes());
+            }
+            BN254Fr::from_le_bytes_mod_order(&bytes)
+        })
+        .collect()
 }
 
 pub fn make_bb4(n: usize) -> Vec<BB4> {

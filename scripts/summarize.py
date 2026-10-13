@@ -42,6 +42,8 @@ def summarize_values(values: list[float]) -> dict[str, float | int]:
     return {
         "processes": len(values),
         "median": statistics.median(values),
+        "min": min(values),
+        "max": max(values),
         "p01": quantile(values, 0.01),
         "p99": quantile(values, 0.99),
         "median_ci99_low": ci_low,
@@ -142,9 +144,9 @@ def latex(summary: dict[str, object]) -> str:
         lines.extend(
             [
                 "",
-                r"\begin{tabular}{@{}lrrrrr@{}}",
+                r"\begin{tabular}{@{}lrrrrrrr@{}}",
                 r"\toprule",
-                r"Comparison & Processes & Median & 99\% CI & p01 & p99 \\",
+                r"Comparison & Processes & Median & 99\% CI & Min & Max & p01 & p99 \\",
                 r"\midrule",
             ]
         )
@@ -154,6 +156,7 @@ def latex(summary: dict[str, object]) -> str:
             lines.append(
                 f"{latex_escape(label)} & {stats['processes']} & {stats['median']:.3f}x & "
                 f"[{stats['median_ci99_low']:.3f}, {stats['median_ci99_high']:.3f}]x & "
+                f"{stats['min']:.3f}x & {stats['max']:.3f}x & "
                 f"{stats['p01']:.3f}x & {stats['p99']:.3f}x \\\\"
             )
         lines.extend([r"\bottomrule", r"\end{tabular}"])
@@ -166,7 +169,8 @@ def markdown(summary: dict[str, object]) -> str:
         "",
         "Times are process-level Criterion medians. Intervals are 99% bootstrap",
         "confidence intervals for the median across independent processes.",
-        "The p01 and p99 columns are empirical process-level quantiles.",
+        "The p01 and p99 columns are empirical process-level quantiles; Min and",
+        "Max are the smallest and largest observed values.",
         "",
     ]
     warnings = summary["warnings"]
@@ -183,10 +187,12 @@ def markdown(summary: dict[str, object]) -> str:
         stats = stats_value
         assert isinstance(stats, dict)
         median, unit = human_time(float(stats["median"]))
-        low, _ = human_time(float(stats["median_ci99_low"]))
-        high, _ = human_time(float(stats["median_ci99_high"]))
-        p01, _ = human_time(float(stats["p01"]))
-        p99, _ = human_time(float(stats["p99"]))
+        # Every column of a row uses the median's unit.
+        divisor = {"ns": 1.0, "us": 1_000.0, "ms": 1_000_000.0}[unit]
+        low = float(stats["median_ci99_low"]) / divisor
+        high = float(stats["median_ci99_high"]) / divisor
+        p01 = float(stats["p01"]) / divisor
+        p99 = float(stats["p99"]) / divisor
         lines.append(
             f"| {name} | {stats['processes']} | {median:.3f} {unit} | "
             f"[{low:.3f}, {high:.3f}] {unit} | {p01:.3f} {unit} | {p99:.3f} {unit} |"
@@ -200,8 +206,8 @@ def markdown(summary: dict[str, object]) -> str:
                 "",
                 "## Paired speedups",
                 "",
-                "| Pair | Processes | Median | 99% CI | p01 | p99 |",
-                "|---|---:|---:|---:|---:|---:|",
+                "| Pair | Processes | Median | 99% CI | Min | Max | p01 | p99 |",
+                "|---|---:|---:|---:|---:|---:|---:|---:|",
             ]
         )
         for label, stats_value in pairs.items():
@@ -210,6 +216,7 @@ def markdown(summary: dict[str, object]) -> str:
             lines.append(
                 f"| {label} | {stats['processes']} | {stats['median']:.3f}x | "
                 f"[{stats['median_ci99_low']:.3f}, {stats['median_ci99_high']:.3f}]x | "
+                f"{stats['min']:.3f}x | {stats['max']:.3f}x | "
                 f"{stats['p01']:.3f}x | {stats['p99']:.3f}x |"
             )
     return "\n".join(lines) + "\n"

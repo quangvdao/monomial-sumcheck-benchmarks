@@ -4,24 +4,10 @@ use rand::seq::SliceRandom;
 use ark_bn254::Fr as BN254Fr;
 use monomial_sumcheck_benchmarks::{
     benchmark_config,
-    sumcheck::{Bn254BranchFree, Bn254UpperLimbMul},
+    sumcheck::{make_bn254, Bn254BranchFree, Bn254UpperLimbMul},
 };
 
 const N: usize = 1 << 20;
-
-fn make_u64s(n: usize) -> Vec<u64> {
-    let mut vals = Vec::with_capacity(n);
-    let mut state: u64 = 0xdeadbeef12345678;
-    for _ in 0..n {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        vals.push(state);
-    }
-    vals
-}
-
-fn make_bn254(n: usize) -> Vec<BN254Fr> {
-    make_u64s(n).iter().map(|&v| BN254Fr::from(v)).collect()
-}
 
 // ---------------------------------------------------------------------------
 // Upper-limb challenge multiplication (Section 6.3)
@@ -75,7 +61,7 @@ fn bench_upper_limb_mul(c: &mut Criterion) {
 
 fn bench_combined(c: &mut Criterion) {
     let template = make_bn254(2 * N);
-    let r_full = BN254Fr::from(0x123456789abcdef0u64);
+    let r_full = make_bn254(1)[0];
     let (_, lo, hi) = make_upper_limb_challenge();
     let template_bf: Vec<Bn254BranchFree> = template.iter().copied().map(Bn254BranchFree).collect();
     let r_full_bf = Bn254BranchFree(r_full);

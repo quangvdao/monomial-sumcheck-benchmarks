@@ -5,7 +5,7 @@ use super::*;
 /// Bind:     2 mul, 2 add, 2 sub per pair.
 pub fn sumcheck_deg2_boolean<F>(f: &mut Vec<F>, g: &mut Vec<F>, challenges: &[F], zero: F)
 where
-    F: Copy + Add<Output = F> + AddAssign + Sub<Output = F> + Mul<Output = F>,
+    F: Copy + Add<Output = F> + AddAssign + Sub<Output = F> + Mul<Output = F> + 'static,
 {
     for round in 0..challenges.len() {
         let half = f.len() / 2;
@@ -28,7 +28,7 @@ where
             h_inf += df * dg;
         }
 
-        black_box((h0, h1, h_inf));
+        round_message((h0, h1, h_inf));
 
         let r = challenges[round];
 
@@ -52,7 +52,7 @@ where
 /// Bind:     2 mul, 2 add per pair.
 pub fn sumcheck_deg2_projective<F>(f: &mut Vec<F>, g: &mut Vec<F>, challenges: &[F], zero: F)
 where
-    F: Copy + Add<Output = F> + AddAssign + Mul<Output = F>,
+    F: Copy + Add<Output = F> + AddAssign + Mul<Output = F> + 'static,
 {
     for round in 0..challenges.len() {
         let half = f.len() / 2;
@@ -72,7 +72,7 @@ where
             h1 += (f0 + fi) * (g0 + gi);
         }
 
-        black_box((h0, h1, h_inf));
+        round_message((h0, h1, h_inf));
 
         let r = challenges[round];
 
@@ -100,7 +100,7 @@ pub fn sumcheck_deg2_eq_gruen_boolean<F>(
     challenges: &[F],
     zero: F,
 ) where
-    F: Copy + Add<Output = F> + AddAssign + Sub<Output = F> + Mul<Output = F>,
+    F: Copy + Add<Output = F> + AddAssign + Sub<Output = F> + Mul<Output = F> + 'static,
 {
     let n = challenges.len();
     for round in 0..n {
@@ -123,7 +123,7 @@ pub fn sumcheck_deg2_eq_gruen_boolean<F>(
             q_inf += df * dg * ew;
         }
 
-        black_box((q1, q_inf));
+        round_message((q1, q_inf));
 
         let r = challenges[round];
         for j in 0..half {
@@ -149,7 +149,7 @@ pub fn sumcheck_deg2_eq_gruen_projective<F>(
     challenges: &[F],
     zero: F,
 ) where
-    F: Copy + Add<Output = F> + AddAssign + Mul<Output = F>,
+    F: Copy + Add<Output = F> + AddAssign + Mul<Output = F> + 'static,
 {
     let n = challenges.len();
     for round in 0..n {
@@ -170,7 +170,7 @@ pub fn sumcheck_deg2_eq_gruen_projective<F>(
             q_inf += fi * gi * ew;
         }
 
-        black_box((q1, q_inf));
+        round_message((q1, q_inf));
 
         let r = challenges[round];
         for j in 0..half {

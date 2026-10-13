@@ -21,7 +21,7 @@ The `binding`, `lookup_tables`, and `sumcheck` suites also run BN254 in a branch
 - `src/sumcheck/data.rs`: synthetic input builders and suffix-EQ table helpers
 - `src/sumcheck/generic.rs`: field-agnostic boolean and projective sumcheck kernels
 - `src/sumcheck/bn254.rs`: BN254 delayed accumulators, the branch-free add/sub element type, and upper-limb challenge variants
-- `src/sumcheck/fp128.rs`: Fp128 kernels, delayed accumulators, and `1/inf` experiments
+- `src/sumcheck/fp128.rs`: Fp128 kernels, delayed accumulators, and the `{1,inf}` kernels. With the tables on `{1,inf}`, the value at 1 and the leading coefficient of a round polynomial are tied by the round claim, so the `{1,inf}` equality kernels compute the value at 0 and the leading coefficient
 - `src/sumcheck/bb_ext.rs`: BB4, BB5, and KB5 delayed accumulators and bind helpers
 - `src/sumcheck/bb5_packed.rs`: packed BB5 EQ evaluators and wrapper paths
 - `src/sumcheck/gf128.rs`: GF(2^128) delayed kernels
@@ -57,8 +57,8 @@ Rust toolchain: `1.94.0` (pinned in `rust-toolchain.toml`).
 
 See [docs/benchmark-methodology.md](docs/benchmark-methodology.md) for the measurement boundary, collection protocol, statistical procedure, and artifact-acceptance rules.
 
-The reference environment is an Apple M4 Max running macOS 26.6.2 (build
-25G83), with Rust 1.94.0 and LLVM 21.1.8 targeting
+The reference environment is an Apple M4 Max running macOS 27.0.1 (build
+26A434), with Rust 1.94.0 and LLVM 21.1.8 targeting
 `aarch64-apple-darwin`. Every accepted run also stores its exact environment
 manifest.
 
@@ -84,7 +84,7 @@ cargo bench --bench sumcheck -- 'sumcheck_deg2_eq/(BB5|Fp128|GF128)/(boolean|pro
 # Reproduce the combined binding table (Section 6.4)
 cargo bench --bench binding -- 'combined'
 
-# Collect 20 independent combined-binding processes with raw samples
+# Collect ten independent combined-binding processes with raw samples
 # (the collector requires a clean committed tree)
 python3 scripts/collect.py \
   --suite binding \
@@ -92,7 +92,8 @@ python3 scripts/collect.py \
   --case BN254/combined_projective_full \
   --case BN254/combined_boolean_upper \
   --case BN254/combined_projective_upper \
-  --repetitions 20 \
+  --repetitions 10 \
+  --max-load-per-cpu 0.4 \
   --label combined
 
 # Summarize a completed run and list its benchmark identifiers

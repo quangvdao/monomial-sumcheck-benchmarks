@@ -75,55 +75,65 @@ fn lat_mul<F: Copy + MulAssign>(name: &str, one: F, elems: &[F], c: &mut Criteri
 }
 
 // ---------------------------------------------------------------------------
-// Throughput: in-register batch of B independent ops.
+// Throughput: B independent chains  acc[i] = acc[i] OP x[k * B + i]
 // B is a const generic sized to each field's register footprint so the
-// working set stays register-resident.  B * PASSES = OPS = 1024 always,
-// so per-op cost = raw time / 1024.
+// accumulators stay register-resident.  Every iteration consumes the same
+// OPS = 1024 operands, so per-op cost = raw time / 1024.  The operands are
+// opaque to the compiler, so none of the 1024 operations can be simplified
+// away, and the accumulators persist across iterations, so the operand
+// sequence a branch predictor sees never repeats.
 // ---------------------------------------------------------------------------
 
 const OPS: usize = 1024;
 
+fn thr_operands<F: Copy, const B: usize>(seed: &[F]) -> ([F; B], &[F; OPS]) {
+    assert!(OPS % B == 0);
+    let acc = std::array::from_fn(|i| seed[i]);
+    let xs = seed[B..B + OPS].try_into().expect("slice length is OPS");
+    (acc, xs)
+}
+
 fn thr_add<F: Copy + Add<Output = F>, const B: usize>(name: &str, seed: &[F], c: &mut Criterion) {
-    let passes = OPS / B;
-    let mut batch: [F; B] = std::array::from_fn(|i| seed[i % seed.len()]);
+    let (mut acc, xs) = thr_operands::<F, B>(seed);
     c.bench_function(&format!("{name}/thr_add"), |b| {
         b.iter(|| {
-            for _ in 0..passes {
+            let xs: &[F; OPS] = black_box(xs);
+            for k in 0..OPS / B {
                 for i in 0..B {
-                    batch[i] = batch[i] + batch[(i + B / 2) % B];
+                    acc[i] = acc[i] + xs[k * B + i];
                 }
             }
-            black_box(batch)
+            black_box(acc)
         })
     });
 }
 
 fn thr_sub<F: Copy + Sub<Output = F>, const B: usize>(name: &str, seed: &[F], c: &mut Criterion) {
-    let passes = OPS / B;
-    let mut batch: [F; B] = std::array::from_fn(|i| seed[i % seed.len()]);
+    let (mut acc, xs) = thr_operands::<F, B>(seed);
     c.bench_function(&format!("{name}/thr_sub"), |b| {
         b.iter(|| {
-            for _ in 0..passes {
+            let xs: &[F; OPS] = black_box(xs);
+            for k in 0..OPS / B {
                 for i in 0..B {
-                    batch[i] = batch[i] - batch[(i + B / 2) % B];
+                    acc[i] = acc[i] - xs[k * B + i];
                 }
             }
-            black_box(batch)
+            black_box(acc)
         })
     });
 }
 
 fn thr_mul<F: Copy + Mul<Output = F>, const B: usize>(name: &str, seed: &[F], c: &mut Criterion) {
-    let passes = OPS / B;
-    let mut batch: [F; B] = std::array::from_fn(|i| seed[i % seed.len()]);
+    let (mut acc, xs) = thr_operands::<F, B>(seed);
     c.bench_function(&format!("{name}/thr_mul"), |b| {
         b.iter(|| {
-            for _ in 0..passes {
+            let xs: &[F; OPS] = black_box(xs);
+            for k in 0..OPS / B {
                 for i in 0..B {
-                    batch[i] = batch[i] * batch[(i + B / 2) % B];
+                    acc[i] = acc[i] * xs[k * B + i];
                 }
             }
-            black_box(batch)
+            black_box(acc)
         })
     });
 }
@@ -191,7 +201,7 @@ fn make_gf128(n: usize) -> Vec<GF128Packed> {
 // Benchmark groups
 // ---------------------------------------------------------------------------
 
-// Batch sizes: B=16 for elements <=20 bytes (enough ILP without spilling).
+// Chain counts: B=16 for elements <=20 bytes (enough ILP without spilling).
 // B=4 for 32-byte types (BN254, Fp128 packed) to avoid register exhaustion.
 
 fn bench_babybear(c: &mut Criterion) {
