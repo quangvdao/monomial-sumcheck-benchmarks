@@ -1,0 +1,29 @@
+# Run directories behind the paper's tables, in the order passed to paper_tables.py.
+# m4-runs: Apple M4; m4max-runs: Apple M4 Max.
+m4-runs/20261013-213829-fieldops-bn254-fr
+m4-runs/20261013-220655-fieldops-gf128-ghash
+m4-runs/20261013-221630-fieldops-koalabear-ext5
+m4-runs/20261013-222551-fieldops-babybear-ext5
+m4-runs/20261013-223528-fieldops-babybear-ext4
+m4-runs/20261013-224509-fieldops-babybear
+m4-runs/20261014-004609-fieldops-fp128
+m4-runs/20261014-010945-tables-bn254-n20
+m4-runs/20261014-012149-tables-bn254bf-n20
+m4-runs/20261014-013328-binding-combined
+m4-runs/20261014-014543-binding-combined-bf
+m4-runs/20261014-015159-binding-chained-mul
+m4-runs/20261014-015724-tables-bb4-n20
+m4max-runs/20261013-165332-sumcheck_deg2-bn254-n20
+m4max-runs/20261013-174450-sumcheck_deg2_eq-bn254-n20
+m4max-runs/20261013-183620-sumcheck_deg2-bn254bf-n20
+m4max-runs/20261013-190125-sumcheck_deg2_eq-bn254bf-n20
+m4max-runs/20261014-045146-sumcheck_deg2-fp128-n20
+m4max-runs/20261014-052707-sumcheck_deg2_eq-fp128-n20
+m4max-runs/20261014-060441-sumcheck_deg2_eq-gf128-n20
+m4max-runs/20261014-061604-sumcheck_deg2_eq-kb5-n20
+m4max-runs/20261014-063315-sumcheck_deg2_eq-bb5-n20
+m4max-runs/20261014-064546-sumcheck_deg2_eq-bb4-n20
+m4max-runs/20261014-065812-sumcheck_deg2-gf128-n20
+m4max-runs/20261014-070950-sumcheck_deg2-kb5-n20
+m4max-runs/20261014-072200-sumcheck_deg2-bb5-n20
+m4max-runs/20261014-073435-sumcheck_deg2-bb4-n20

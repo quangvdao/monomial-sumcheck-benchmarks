@@ -43,8 +43,10 @@ case per Cargo process.
 
 ## Independent repetitions
 
-Every reported comparison uses ten independent outer repetitions; the
-per-operation field table uses five. Each compared
+The BN254 and Fp128 prover kernels and the binding and table-construction
+suites use ten independent outer repetitions; the per-operation field table
+and the prover kernels over the BabyBear and KoalaBear extensions and
+GF(2^128) use five. Each compared
 case runs as the only selected benchmark in a fresh Cargo process. The
 collector pairs cases by outer repetition and cyclically balances their order,
 so no variant systematically inherits the first-benchmark penalty. Collect a
@@ -81,7 +83,8 @@ repetition that the commit and the working tree have not changed. It also
 refuses a busy host: it compares the one-minute load average per logical CPU
 with a threshold before and after every case, and a repetition that exceeds
 the threshold is marked failed and ends the collection. The reported data use
-a threshold of 0.4 (`--max-load-per-cpu 0.4`); the default is 0.25.
+a threshold of 0.4 on the M4 Max and 0.6 on the M4 (`--max-load-per-cpu`); the
+default is 0.25.
 `--allow-dirty` and `--allow-busy` are reserved for smoke tests, and such a
 run is not eligible for `artifacts/data`.
 
@@ -122,6 +125,19 @@ Move a completed and reviewed run to artifacts/data before using it in the
 paper. Preserve the raw files and generate the LaTeX table from the accepted
 summary. Do not transcribe table entries manually.
 
+## Paper tables
+
+`scripts/paper_tables.py` writes every table body and every number quoted in
+the paper (`tab_*.tex` and `numbers.tex`) from a list of run directories:
+
+    cd DATA_SET
+    python3 REPO/scripts/paper_tables.py --out OUT_DIR \
+      $(grep -v '^#' REPO/docs/paper-runs.txt)
+
+where DATA_SET holds the `m4-runs` and `m4max-runs` directories. If two directories contain the same case, the later one is used, and a
+speedup is computed only from two cases of the same run directory. The
+uncertainty table uses the same paired ratios as `summarize.py`.
+
 ## Machine state
 
 The manifest records the collector's full command line, the load threshold,
@@ -138,8 +154,11 @@ machine on AC power. If thermal throttling or an interrupted process is
 observed, discard the entire affected process run rather than deleting
 individual samples.
 
-The current reference environment is an Apple M4 Max running macOS 27.0.1
-(build 26A434), Rust 1.94.0, LLVM 21.1.8, and the
-`aarch64-apple-darwin` target. Treat a toolchain or operating-system change as
+The paper's prover kernels run on an Apple M4 Max and the field-arithmetic,
+binding, and table-construction suites on an Apple M4. Both run macOS 27.0.1
+(build 26A434), Rust 1.94.0, LLVM 21.1.8, and the `aarch64-apple-darwin`
+target. The BN254 prover kernels and the field arithmetic of every field other
+than Fp128 come from commit 6d7f6c5; everything else comes from 77a25a5, which
+changes only the source of the Fp128 implementation. Treat a toolchain or operating-system change as
 a new experimental environment; do not merge its repetitions into an existing
 data set.
