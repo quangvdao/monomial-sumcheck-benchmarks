@@ -1,6 +1,10 @@
 use super::bb_ext::{BB5Accum, BB5MulByConst};
 use super::*;
 
+// The projective kernels accumulate the product of loaded values first, as
+// the Boolean kernels do.  The loop is short of registers, and on the degree-5
+// extensions LLVM's schedule for the other order is 5-10% slower.
+
 #[cfg_attr(
     all(target_arch = "aarch64", target_feature = "neon"),
     allow(dead_code)
@@ -44,8 +48,8 @@ pub fn bb5_eq_gruen_projective_eval_ref(f: &[BB5], g: &[BB5], eq_rest: &[BB5]) -
         let sf = f0 + fi;
         let sg = g0 + gi;
 
-        q1 += sf * sg * ew;
         q_inf += fi * gi * ew;
+        q1 += sf * sg * ew;
     }
 
     (q1, q_inf)
@@ -114,8 +118,8 @@ pub fn bb5_eq_projective_delayed_eval_ref(
         let sf = f0 + fi;
         let sg = g0 + gi;
 
-        q1.fmadd(sf * sg, ew);
         q_inf.fmadd(fi * gi, ew);
+        q1.fmadd(sf * sg, ew);
     }
 
     (q1, q_inf)
@@ -267,8 +271,8 @@ pub fn bb5_eq_gruen_projective_eval_packed(f: &[BB5], g: &[BB5], eq_rest: &[BB5]
         let sf = f0 + fi;
         let sg = g0 + gi;
 
-        q1_packed += (sf * sg) * ew;
         q_inf_packed += (fi * gi) * ew;
+        q1_packed += (sf * sg) * ew;
     }
 
     for j in packed_end..half {
@@ -280,8 +284,8 @@ pub fn bb5_eq_gruen_projective_eval_packed(f: &[BB5], g: &[BB5], eq_rest: &[BB5]
         let sf = f0 + fi;
         let sg = g0 + gi;
 
-        q1_tail += sf * sg * ew;
         q_inf_tail += fi * gi * ew;
+        q1_tail += sf * sg * ew;
     }
 
     (
@@ -310,8 +314,8 @@ fn bb5_eq_projective_delayed_eval_packed(
         let sf = f0 + fi;
         let sg = g0 + gi;
 
-        bb5_accum_fmadd_packed(&mut q1, sf * sg, ew);
         bb5_accum_fmadd_packed(&mut q_inf, fi * gi, ew);
+        bb5_accum_fmadd_packed(&mut q1, sf * sg, ew);
     }
 
     for j in packed_end..half {
@@ -323,8 +327,8 @@ fn bb5_eq_projective_delayed_eval_packed(
         let sf = f0 + fi;
         let sg = g0 + gi;
 
-        q1.fmadd(sf * sg, ew);
         q_inf.fmadd(fi * gi, ew);
+        q1.fmadd(sf * sg, ew);
     }
 
     (q1, q_inf)

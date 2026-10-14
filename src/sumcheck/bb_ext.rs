@@ -612,8 +612,12 @@ macro_rules! delayed_sumcheck_fns {
                         let ew = eq_rest[j];
                         let sf = f0 + fi;
                         let sg = g0 + gi;
-                        q1.fmadd(sf * sg, ew);
+                        // Accumulate the product of loaded values first, as the
+                        // Boolean kernel does.  With two nine-limb accumulators the
+                        // loop is short of registers, and on the degree-5 extensions
+                        // LLVM's schedule for the other order is 5-10% slower.
                         q_inf.fmadd(fi * gi, ew);
+                        q1.fmadd(sf * sg, ew);
                     }
                     round_message((q1.reduce(), q_inf.reduce()));
                     let r = challenges[round];
