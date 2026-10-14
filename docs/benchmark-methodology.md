@@ -154,11 +154,15 @@ machine on AC power. If thermal throttling or an interrupted process is
 observed, discard the entire affected process run rather than deleting
 individual samples.
 
-The paper's prover kernels run on an Apple M4 Max and the field-arithmetic,
-binding, and table-construction suites on an Apple M4. Both run macOS 27.0.1
-(build 26A434), Rust 1.94.0, LLVM 21.1.8, and the `aarch64-apple-darwin`
-target. The BN254 prover kernels and the field arithmetic of every field other
-than Fp128 come from commit 6d7f6c5; everything else comes from 77a25a5, which
-changes only the source of the Fp128 implementation. Treat a toolchain or operating-system change as
+The paper's BN254 and Fp128 prover kernels run on an Apple M4 Max; the other
+prover kernels and the field-arithmetic, binding, and table-construction suites
+run on an Apple M4. Both run macOS 27.0.1 (build 26A434), Rust 1.94.0, LLVM
+21.1.8, and the `aarch64-apple-darwin` target. The BN254 prover kernels and the
+field arithmetic of every field other than Fp128 come from commit 6d7f6c5; the
+equality-factor prover kernels over the BabyBear and KoalaBear extensions come
+from 3dc0e5d; everything else comes from 77a25a5. Commit 77a25a5 changes only
+the source of the Fp128 implementation, and 3dc0e5d changes only the
+accumulation order in those projective kernels (see
+[`code-shaping.md`](code-shaping.md)). Treat a toolchain or operating-system change as
 a new experimental environment; do not merge its repetitions into an existing
 data set.

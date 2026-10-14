@@ -20,6 +20,17 @@ accumulator helper, and the same accumulation order, differing only in sums
 versus differences. Both variants therefore share one code shape. Keep them
 mirrored when changing either.
 
+Commit 3dc0e5d fixed the one place where the mirror was incomplete: the
+projective equality-factor kernels accumulated the product of differences
+(`q1`) before the product of loaded values (`q_inf`), the opposite of the
+Boolean kernels. The loop holds two nine-limb `u128` accumulators, more than
+the 31 general-purpose registers, and on the degree-5 extensions LLVM's
+schedule for that order was 5-10% slower whichever variant used it. Swapping
+the order in either variant, measured separately, showed the loaded-value
+product first is the faster order for both on BabyBear Ext4/Ext5 and
+KoalaBear Ext5. The Fp128 kernels are faster in the other order and keep it;
+BN254 and GF(2^128) are insensitive to it.
+
 The sizes of compiled functions and stack frames remain compiler-specific
 diagnostics, not portable performance results. Recheck them whenever the pinned
 toolchain changes.
