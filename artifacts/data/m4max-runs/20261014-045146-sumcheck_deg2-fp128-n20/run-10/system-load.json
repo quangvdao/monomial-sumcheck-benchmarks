@@ -1,0 +1,170 @@
+[
+  {
+    "case_index": 1,
+    "command": [
+      "cargo",
+      "bench",
+      "--bench",
+      "sumcheck",
+      "--",
+      "^sumcheck_deg2/Fp128/proj_delayed/20$",
+      "--noplot"
+    ],
+    "before": {
+      "captured_at_utc": "2026-10-14T04:23:35.632616+00:00",
+      "load_average_1m": 3.427734375,
+      "load_average_5m": 3.56689453125,
+      "load_average_15m": 6.54833984375,
+      "logical_cpus": 16,
+      "load_1m_per_logical_cpu": 0.2142333984375
+    },
+    "after": {
+      "captured_at_utc": "2026-10-14T04:24:09.200930+00:00",
+      "load_average_1m": 3.09375,
+      "load_average_5m": 3.47021484375,
+      "load_average_15m": 6.3916015625,
+      "logical_cpus": 16,
+      "load_1m_per_logical_cpu": 0.193359375
+    }
+  },
+  {
+    "case_index": 2,
+    "command": [
+      "cargo",
+      "bench",
+      "--bench",
+      "sumcheck",
+      "--",
+      "^sumcheck_deg2/Fp128/projective_1inf/20$",
+      "--noplot"
+    ],
+    "before": {
+      "captured_at_utc": "2026-10-14T04:24:09.216133+00:00",
+      "load_average_1m": 3.09375,
+      "load_average_5m": 3.47021484375,
+      "load_average_15m": 6.3916015625,
+      "logical_cpus": 16,
+      "load_1m_per_logical_cpu": 0.193359375
+    },
+    "after": {
+      "captured_at_utc": "2026-10-14T04:24:46.193927+00:00",
+      "load_average_1m": 3.341796875,
+      "load_average_5m": 3.48193359375,
+      "load_average_15m": 6.27685546875,
+      "logical_cpus": 16,
+      "load_1m_per_logical_cpu": 0.2088623046875
+    }
+  },
+  {
+    "case_index": 3,
+    "command": [
+      "cargo",
+      "bench",
+      "--bench",
+      "sumcheck",
+      "--",
+      "^sumcheck_deg2/Fp128/projective_1inf_delayed/20$",
+      "--noplot"
+    ],
+    "before": {
+      "captured_at_utc": "2026-10-14T04:24:46.208844+00:00",
+      "load_average_1m": 3.341796875,
+      "load_average_5m": 3.48193359375,
+      "load_average_15m": 6.27685546875,
+      "logical_cpus": 16,
+      "load_1m_per_logical_cpu": 0.2088623046875
+    },
+    "after": {
+      "captured_at_utc": "2026-10-14T04:25:20.239948+00:00",
+      "load_average_1m": 3.74169921875,
+      "load_average_5m": 3.54345703125,
+      "load_average_15m": 6.18408203125,
+      "logical_cpus": 16,
+      "load_1m_per_logical_cpu": 0.233856201171875
+    }
+  },
+  {
+    "case_index": 4,
+    "command": [
+      "cargo",
+      "bench",
+      "--bench",
+      "sumcheck",
+      "--",
+      "^sumcheck_deg2/Fp128/boolean/20$",
+      "--noplot"
+    ],
+    "before": {
+      "captured_at_utc": "2026-10-14T04:25:20.254900+00:00",
+      "load_average_1m": 3.74169921875,
+      "load_average_5m": 3.54345703125,
+      "load_average_15m": 6.18408203125,
+      "logical_cpus": 16,
+      "load_1m_per_logical_cpu": 0.233856201171875
+    },
+    "after": {
+      "captured_at_utc": "2026-10-14T04:25:56.730153+00:00",
+      "load_average_1m": 3.4658203125,
+      "load_average_5m": 3.4970703125,
+      "load_average_15m": 6.0595703125,
+      "logical_cpus": 16,
+      "load_1m_per_logical_cpu": 0.21661376953125
+    }
+  },
+  {
+    "case_index": 5,
+    "command": [
+      "cargo",
+      "bench",
+      "--bench",
+      "sumcheck",
+      "--",
+      "^sumcheck_deg2/Fp128/projective/20$",
+      "--noplot"
+    ],
+    "before": {
+      "captured_at_utc": "2026-10-14T04:25:56.745300+00:00",
+      "load_average_1m": 3.4658203125,
+      "load_average_5m": 3.4970703125,
+      "load_average_15m": 6.0595703125,
+      "logical_cpus": 16,
+      "load_1m_per_logical_cpu": 0.21661376953125
+    },
+    "after": {
+      "captured_at_utc": "2026-10-14T04:26:33.342041+00:00",
+      "load_average_1m": 2.47021484375,
+      "load_average_5m": 3.24951171875,
+      "load_average_15m": 5.865234375,
+      "logical_cpus": 16,
+      "load_1m_per_logical_cpu": 0.154388427734375
+    }
+  },
+  {
+    "case_index": 6,
+    "command": [
+      "cargo",
+      "bench",
+      "--bench",
+      "sumcheck",
+      "--",
+      "^sumcheck_deg2/Fp128/delayed/20$",
+      "--noplot"
+    ],
+    "before": {
+      "captured_at_utc": "2026-10-14T04:26:33.357239+00:00",
+      "load_average_1m": 2.47021484375,
+      "load_average_5m": 3.24951171875,
+      "load_average_15m": 5.865234375,
+      "logical_cpus": 16,
+      "load_1m_per_logical_cpu": 0.154388427734375
+    },
+    "after": {
+      "captured_at_utc": "2026-10-14T04:27:07.437639+00:00",
+      "load_average_1m": 3.6484375,
+      "load_average_5m": 3.4443359375,
+      "load_average_15m": 5.8291015625,
+      "logical_cpus": 16,
+      "load_1m_per_logical_cpu": 0.22802734375
+    }
+  }
+]

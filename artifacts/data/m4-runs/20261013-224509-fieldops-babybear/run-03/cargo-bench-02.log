@@ -1,0 +1,14 @@
+    Finished `bench` profile [optimized] target(s) in 0.05s
+     Running benches/field_ops.rs (target/release/deps/field_ops-87034789152b9eab)
+Gnuplot not found, using plotters backend
+Benchmarking BabyBear/thr_add
+Benchmarking BabyBear/thr_add: Warming up for 5.0000 s
+Benchmarking BabyBear/thr_add: Collecting 100 samples in estimated 10.000 s (104M iterations)
+Benchmarking BabyBear/thr_add: Analyzing
+BabyBear/thr_add        time:   [96.412 ns 96.598 ns 96.828 ns]
+                        change: [-0.0650% +0.2111% +0.4831%] (p = 0.05 > 0.05)
+                        No change in performance detected.
+Found 6 outliers among 100 measurements (6.00%)
+  4 (4.00%) high mild
+  2 (2.00%) high severe
+

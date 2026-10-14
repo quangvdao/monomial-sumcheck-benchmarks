@@ -1,0 +1,16 @@
+    Finished `bench` profile [optimized] target(s) in 0.08s
+     Running benches/lookup_tables.rs (target/release/deps/lookup_tables-1d5caa59e9b0188d)
+Gnuplot not found, using plotters backend
+Benchmarking eq_table_build/BB4_projective/20
+Benchmarking eq_table_build/BB4_projective/20: Warming up for 5.0000 s
+
+Warning: Unable to complete 100 samples in 10.0s. You may wish to increase target time to 18.0s, enable flat sampling, or reduce sample count to 50.
+Benchmarking eq_table_build/BB4_projective/20: Collecting 100 samples in estimated 17.980 s (5050 iterations)
+Benchmarking eq_table_build/BB4_projective/20: Analyzing
+eq_table_build/BB4_projective/20
+                        time:   [3.5713 ms 3.5869 ms 3.6042 ms]
+                        change: [+1.3189% +2.0157% +2.7424%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 4 outliers among 100 measurements (4.00%)
+  4 (4.00%) high mild
+

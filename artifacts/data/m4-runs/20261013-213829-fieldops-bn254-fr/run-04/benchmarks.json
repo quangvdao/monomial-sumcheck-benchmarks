@@ -1,0 +1,8 @@
+[
+  "BN254_Fr_lat_add",
+  "BN254_Fr_lat_mul",
+  "BN254_Fr_lat_sub",
+  "BN254_Fr_thr_add",
+  "BN254_Fr_thr_mul",
+  "BN254_Fr_thr_sub"
+]

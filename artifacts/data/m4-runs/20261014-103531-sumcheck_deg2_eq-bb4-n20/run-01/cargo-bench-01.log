@@ -1,0 +1,16 @@
+   Compiling monomial-sumcheck-benchmarks v0.1.0 (/private/tmp/claude-501/-Users-quangdao-Documents-Research/ffa42d29-d774-45fd-ab98-a538b9e137ae/scratchpad/localbench)
+    Finished `bench` profile [optimized] target(s) in 7.80s
+     Running benches/sumcheck.rs (target/release/deps/sumcheck-3b706c336da0a6ad)
+Gnuplot not found, using plotters backend
+Benchmarking sumcheck_deg2_eq/BB4/boolean/20
+Benchmarking sumcheck_deg2_eq/BB4/boolean/20: Warming up for 5.0000 s
+Benchmarking sumcheck_deg2_eq/BB4/boolean/20: Collecting 100 samples in estimated 11.173 s (600 iterations)
+Benchmarking sumcheck_deg2_eq/BB4/boolean/20: Analyzing
+sumcheck_deg2_eq/BB4/boolean/20
+                        time:   [18.347 ms 18.892 ms 19.604 ms]
+                        change: [+3.7119% +6.5838% +10.011%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 15 outliers among 100 measurements (15.00%)
+  3 (3.00%) high mild
+  12 (12.00%) high severe
+

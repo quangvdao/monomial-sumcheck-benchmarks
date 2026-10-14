@@ -147,7 +147,8 @@ def main():
                 continue
             vals = [d.med(f"{k}_{f}/{v}/20") for v in variants]
             best = min((v for v in vals if v is not None), default=None)
-            cells += [f"\\textbf{{{ms(v)}}}" if v is not None and v == best else ms(v) for v in vals]
+            # Bold every variant that ties the fastest at the displayed precision.
+            cells += [f"\\textbf{{{ms(v)}}}" if v is not None and ms(v) == ms(best) else ms(v) for v in vals]
         rows.append(f"{name} & " + " & ".join(cells) + " \\\\")
     (out / "tab_e2e.tex").write_text("\n".join(rows) + "\n")
 
@@ -181,8 +182,8 @@ def main():
 
     # Field operations (Table 1).  Latency chains have 2^20 operations and
     # throughput batches have 2^10.
-    groups = [[("MontyField31", "BabyBear"), ("MontyField31 Ext4", "BabyBear_Ext4"),
-               ("MontyField31 Ext5 (bin.)", "BabyBear_Ext5"), ("MontyField31 Ext5 (tri.)", "KoalaBear_Ext5")],
+    groups = [[("BabyBear", "BabyBear"), ("BB Ext4", "BabyBear_Ext4"),
+               ("BB Ext5", "BabyBear_Ext5"), ("KoalaBear Ext5", "KoalaBear_Ext5")],
               [("Fp128", "Fp128")], [("BN254 $\\mathbb{F}_r$", "BN254_Fr")], [("GF($2^{128}$)", "GF128_Ghash")]]
     per_op = {}
     lines = []

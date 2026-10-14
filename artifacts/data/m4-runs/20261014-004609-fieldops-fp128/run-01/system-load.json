@@ -1,0 +1,170 @@
+[
+  {
+    "case_index": 1,
+    "command": [
+      "cargo",
+      "bench",
+      "--bench",
+      "field_ops",
+      "--",
+      "^Fp128/lat_add$",
+      "--noplot"
+    ],
+    "before": {
+      "captured_at_utc": "2026-10-13T23:46:10.105719+00:00",
+      "load_average_1m": 5.34130859375,
+      "load_average_5m": 18.4697265625,
+      "load_average_15m": 23.4609375,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.534130859375
+    },
+    "after": {
+      "captured_at_utc": "2026-10-13T23:46:29.577085+00:00",
+      "load_average_1m": 4.6005859375,
+      "load_average_5m": 17.66259765625,
+      "load_average_15m": 23.0849609375,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.46005859375
+    }
+  },
+  {
+    "case_index": 2,
+    "command": [
+      "cargo",
+      "bench",
+      "--bench",
+      "field_ops",
+      "--",
+      "^Fp128/lat_sub$",
+      "--noplot"
+    ],
+    "before": {
+      "captured_at_utc": "2026-10-13T23:46:29.605109+00:00",
+      "load_average_1m": 4.6005859375,
+      "load_average_5m": 17.66259765625,
+      "load_average_15m": 23.0849609375,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.46005859375
+    },
+    "after": {
+      "captured_at_utc": "2026-10-13T23:46:49.291725+00:00",
+      "load_average_1m": 3.94189453125,
+      "load_average_5m": 16.6640625,
+      "load_average_15m": 22.599609375,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.394189453125
+    }
+  },
+  {
+    "case_index": 3,
+    "command": [
+      "cargo",
+      "bench",
+      "--bench",
+      "field_ops",
+      "--",
+      "^Fp128/lat_mul$",
+      "--noplot"
+    ],
+    "before": {
+      "captured_at_utc": "2026-10-13T23:46:49.300567+00:00",
+      "load_average_1m": 3.94189453125,
+      "load_average_5m": 16.6640625,
+      "load_average_15m": 22.599609375,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.394189453125
+    },
+    "after": {
+      "captured_at_utc": "2026-10-13T23:47:05.933726+00:00",
+      "load_average_1m": 3.40869140625,
+      "load_average_5m": 15.7138671875,
+      "load_average_15m": 22.1201171875,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.340869140625
+    }
+  },
+  {
+    "case_index": 4,
+    "command": [
+      "cargo",
+      "bench",
+      "--bench",
+      "field_ops",
+      "--",
+      "^Fp128/thr_add$",
+      "--noplot"
+    ],
+    "before": {
+      "captured_at_utc": "2026-10-13T23:47:05.942927+00:00",
+      "load_average_1m": 3.40869140625,
+      "load_average_5m": 15.7138671875,
+      "load_average_15m": 22.1201171875,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.340869140625
+    },
+    "after": {
+      "captured_at_utc": "2026-10-13T23:47:26.033577+00:00",
+      "load_average_1m": 3.29296875,
+      "load_average_5m": 14.88916015625,
+      "load_average_15m": 21.6748046875,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.329296875
+    }
+  },
+  {
+    "case_index": 5,
+    "command": [
+      "cargo",
+      "bench",
+      "--bench",
+      "field_ops",
+      "--",
+      "^Fp128/thr_sub$",
+      "--noplot"
+    ],
+    "before": {
+      "captured_at_utc": "2026-10-13T23:47:26.042795+00:00",
+      "load_average_1m": 3.29296875,
+      "load_average_5m": 14.88916015625,
+      "load_average_15m": 21.6748046875,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.329296875
+    },
+    "after": {
+      "captured_at_utc": "2026-10-13T23:47:42.605400+00:00",
+      "load_average_1m": 2.93212890625,
+      "load_average_5m": 14.24072265625,
+      "load_average_15m": 21.32421875,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.293212890625
+    }
+  },
+  {
+    "case_index": 6,
+    "command": [
+      "cargo",
+      "bench",
+      "--bench",
+      "field_ops",
+      "--",
+      "^Fp128/thr_mul$",
+      "--noplot"
+    ],
+    "before": {
+      "captured_at_utc": "2026-10-13T23:47:42.615000+00:00",
+      "load_average_1m": 2.93212890625,
+      "load_average_5m": 14.24072265625,
+      "load_average_15m": 21.32421875,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.293212890625
+    },
+    "after": {
+      "captured_at_utc": "2026-10-13T23:48:00.586336+00:00",
+      "load_average_1m": 2.80908203125,
+      "load_average_5m": 13.47900390625,
+      "load_average_15m": 20.88623046875,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.280908203125
+    }
+  }
+]

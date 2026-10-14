@@ -1,0 +1,8 @@
+[
+  "sumcheck_deg2_Fp128/boolean/20",
+  "sumcheck_deg2_Fp128/delayed/20",
+  "sumcheck_deg2_Fp128/proj_delayed/20",
+  "sumcheck_deg2_Fp128/projective/20",
+  "sumcheck_deg2_Fp128/projective_1inf/20",
+  "sumcheck_deg2_Fp128/projective_1inf_delayed/20"
+]

@@ -1,0 +1,170 @@
+[
+  {
+    "case_index": 1,
+    "command": [
+      "cargo",
+      "bench",
+      "--bench",
+      "field_ops",
+      "--",
+      "^BabyBear_Ext5/lat_add$",
+      "--noplot"
+    ],
+    "before": {
+      "captured_at_utc": "2026-10-13T21:25:51.572377+00:00",
+      "load_average_1m": 2.56884765625,
+      "load_average_5m": 2.5810546875,
+      "load_average_15m": 2.5986328125,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.256884765625
+    },
+    "after": {
+      "captured_at_utc": "2026-10-13T21:26:14.022387+00:00",
+      "load_average_1m": 2.57275390625,
+      "load_average_5m": 2.576171875,
+      "load_average_15m": 2.5947265625,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.257275390625
+    }
+  },
+  {
+    "case_index": 2,
+    "command": [
+      "cargo",
+      "bench",
+      "--bench",
+      "field_ops",
+      "--",
+      "^BabyBear_Ext5/lat_sub$",
+      "--noplot"
+    ],
+    "before": {
+      "captured_at_utc": "2026-10-13T21:26:14.027526+00:00",
+      "load_average_1m": 2.57275390625,
+      "load_average_5m": 2.576171875,
+      "load_average_15m": 2.5947265625,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.257275390625
+    },
+    "after": {
+      "captured_at_utc": "2026-10-13T21:26:36.256429+00:00",
+      "load_average_1m": 2.52734375,
+      "load_average_5m": 2.5693359375,
+      "load_average_15m": 2.5908203125,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.252734375
+    }
+  },
+  {
+    "case_index": 3,
+    "command": [
+      "cargo",
+      "bench",
+      "--bench",
+      "field_ops",
+      "--",
+      "^BabyBear_Ext5/lat_mul$",
+      "--noplot"
+    ],
+    "before": {
+      "captured_at_utc": "2026-10-13T21:26:36.262438+00:00",
+      "load_average_1m": 2.52734375,
+      "load_average_5m": 2.5693359375,
+      "load_average_15m": 2.5908203125,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.252734375
+    },
+    "after": {
+      "captured_at_utc": "2026-10-13T21:26:52.396909+00:00",
+      "load_average_1m": 2.44384765625,
+      "load_average_5m": 2.54736328125,
+      "load_average_15m": 2.58154296875,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.244384765625
+    }
+  },
+  {
+    "case_index": 4,
+    "command": [
+      "cargo",
+      "bench",
+      "--bench",
+      "field_ops",
+      "--",
+      "^BabyBear_Ext5/thr_add$",
+      "--noplot"
+    ],
+    "before": {
+      "captured_at_utc": "2026-10-13T21:26:52.402117+00:00",
+      "load_average_1m": 2.44384765625,
+      "load_average_5m": 2.54736328125,
+      "load_average_15m": 2.58154296875,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.244384765625
+    },
+    "after": {
+      "captured_at_utc": "2026-10-13T21:27:11.859657+00:00",
+      "load_average_1m": 2.32275390625,
+      "load_average_5m": 2.51171875,
+      "load_average_15m": 2.56787109375,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.232275390625
+    }
+  },
+  {
+    "case_index": 5,
+    "command": [
+      "cargo",
+      "bench",
+      "--bench",
+      "field_ops",
+      "--",
+      "^BabyBear_Ext5/thr_sub$",
+      "--noplot"
+    ],
+    "before": {
+      "captured_at_utc": "2026-10-13T21:27:11.866023+00:00",
+      "load_average_1m": 2.32275390625,
+      "load_average_5m": 2.51171875,
+      "load_average_15m": 2.56787109375,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.232275390625
+    },
+    "after": {
+      "captured_at_utc": "2026-10-13T21:27:30.598417+00:00",
+      "load_average_1m": 2.109375,
+      "load_average_5m": 2.45361328125,
+      "load_average_15m": 2.5458984375,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.2109375
+    }
+  },
+  {
+    "case_index": 6,
+    "command": [
+      "cargo",
+      "bench",
+      "--bench",
+      "field_ops",
+      "--",
+      "^BabyBear_Ext5/thr_mul$",
+      "--noplot"
+    ],
+    "before": {
+      "captured_at_utc": "2026-10-13T21:27:30.604668+00:00",
+      "load_average_1m": 2.109375,
+      "load_average_5m": 2.45361328125,
+      "load_average_15m": 2.5458984375,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.2109375
+    },
+    "after": {
+      "captured_at_utc": "2026-10-13T21:27:46.705569+00:00",
+      "load_average_1m": 2.30029296875,
+      "load_average_5m": 2.47216796875,
+      "load_average_15m": 2.5498046875,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.230029296875
+    }
+  }
+]

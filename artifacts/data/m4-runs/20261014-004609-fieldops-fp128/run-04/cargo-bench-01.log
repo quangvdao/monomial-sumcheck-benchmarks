@@ -1,0 +1,11 @@
+    Finished `bench` profile [optimized] target(s) in 0.07s
+     Running benches/field_ops.rs (target/release/deps/field_ops-bc2bbb73f07e9385)
+Gnuplot not found, using plotters backend
+Benchmarking Fp128/thr_add
+Benchmarking Fp128/thr_add: Warming up for 5.0000 s
+Benchmarking Fp128/thr_add: Collecting 100 samples in estimated 10.000 s (18M iterations)
+Benchmarking Fp128/thr_add: Analyzing
+Fp128/thr_add           time:   [570.72 ns 571.76 ns 572.89 ns]
+                        change: [+0.3782% +0.5151% +0.6596%] (p = 0.00 < 0.05)
+                        Change within noise threshold.
+

@@ -1,0 +1,20 @@
+[
+  [
+    "cargo",
+    "bench",
+    "--bench",
+    "binding",
+    "--",
+    "^BN254/combined_boolean_bf$",
+    "--noplot"
+  ],
+  [
+    "cargo",
+    "bench",
+    "--bench",
+    "binding",
+    "--",
+    "^BN254/combined_projective_bf$",
+    "--noplot"
+  ]
+]

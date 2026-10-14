@@ -1,0 +1,114 @@
+[
+  {
+    "case_index": 1,
+    "command": [
+      "cargo",
+      "bench",
+      "--bench",
+      "lookup_tables",
+      "--",
+      "^eq_table_build/BN254bf_boolean/20$",
+      "--noplot"
+    ],
+    "before": {
+      "captured_at_utc": "2026-10-14T00:31:08.313514+00:00",
+      "load_average_1m": 2.001953125,
+      "load_average_5m": 2.08544921875,
+      "load_average_15m": 3.71923828125,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.2001953125
+    },
+    "after": {
+      "captured_at_utc": "2026-10-14T00:31:24.348857+00:00",
+      "load_average_1m": 1.9326171875,
+      "load_average_5m": 2.064453125,
+      "load_average_15m": 3.6826171875,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.19326171875
+    }
+  },
+  {
+    "case_index": 2,
+    "command": [
+      "cargo",
+      "bench",
+      "--bench",
+      "lookup_tables",
+      "--",
+      "^eq_table_build/BN254bf_projective/20$",
+      "--noplot"
+    ],
+    "before": {
+      "captured_at_utc": "2026-10-14T00:31:24.357359+00:00",
+      "load_average_1m": 1.9326171875,
+      "load_average_5m": 2.064453125,
+      "load_average_15m": 3.6826171875,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.19326171875
+    },
+    "after": {
+      "captured_at_utc": "2026-10-14T00:31:45.049904+00:00",
+      "load_average_1m": 1.95703125,
+      "load_average_5m": 2.05908203125,
+      "load_average_15m": 3.642578125,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.195703125
+    }
+  },
+  {
+    "case_index": 3,
+    "command": [
+      "cargo",
+      "bench",
+      "--bench",
+      "lookup_tables",
+      "--",
+      "^lt_table_build/BN254bf_boolean/20$",
+      "--noplot"
+    ],
+    "before": {
+      "captured_at_utc": "2026-10-14T00:31:45.058467+00:00",
+      "load_average_1m": 1.95703125,
+      "load_average_5m": 2.05908203125,
+      "load_average_15m": 3.642578125,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.195703125
+    },
+    "after": {
+      "captured_at_utc": "2026-10-14T00:32:01.993222+00:00",
+      "load_average_1m": 1.96630859375,
+      "load_average_5m": 2.0556640625,
+      "load_average_15m": 3.61328125,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.196630859375
+    }
+  },
+  {
+    "case_index": 4,
+    "command": [
+      "cargo",
+      "bench",
+      "--bench",
+      "lookup_tables",
+      "--",
+      "^lt_table_build/BN254bf_projective/20$",
+      "--noplot"
+    ],
+    "before": {
+      "captured_at_utc": "2026-10-14T00:32:02.000344+00:00",
+      "load_average_1m": 1.96630859375,
+      "load_average_5m": 2.0556640625,
+      "load_average_15m": 3.61328125,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.196630859375
+    },
+    "after": {
+      "captured_at_utc": "2026-10-14T00:32:18.114483+00:00",
+      "load_average_1m": 1.8447265625,
+      "load_average_5m": 2.01953125,
+      "load_average_15m": 3.5634765625,
+      "logical_cpus": 10,
+      "load_1m_per_logical_cpu": 0.18447265625
+    }
+  }
+]

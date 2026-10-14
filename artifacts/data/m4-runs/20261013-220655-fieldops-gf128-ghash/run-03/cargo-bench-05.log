@@ -1,0 +1,14 @@
+    Finished `bench` profile [optimized] target(s) in 0.05s
+     Running benches/field_ops.rs (target/release/deps/field_ops-87034789152b9eab)
+Gnuplot not found, using plotters backend
+Benchmarking GF128_Ghash/lat_add
+Benchmarking GF128_Ghash/lat_add: Warming up for 5.0000 s
+Benchmarking GF128_Ghash/lat_add: Collecting 100 samples in estimated 10.541 s (20k iterations)
+Benchmarking GF128_Ghash/lat_add: Analyzing
+GF128_Ghash/lat_add     time:   [520.57 µs 521.41 µs 522.40 µs]
+                        change: [-0.4149% +0.1035% +0.6971%] (p = 0.68 > 0.05)
+                        No change in performance detected.
+Found 6 outliers among 100 measurements (6.00%)
+  4 (4.00%) high mild
+  2 (2.00%) high severe
+

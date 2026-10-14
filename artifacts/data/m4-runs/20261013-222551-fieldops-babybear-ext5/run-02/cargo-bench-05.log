@@ -1,0 +1,14 @@
+    Finished `bench` profile [optimized] target(s) in 0.06s
+     Running benches/field_ops.rs (target/release/deps/field_ops-87034789152b9eab)
+Gnuplot not found, using plotters backend
+Benchmarking BabyBear_Ext5/thr_mul
+Benchmarking BabyBear_Ext5/thr_mul: Warming up for 5.0000 s
+Benchmarking BabyBear_Ext5/thr_mul: Collecting 100 samples in estimated 10.003 s (3.6M iterations)
+Benchmarking BabyBear_Ext5/thr_mul: Analyzing
+BabyBear_Ext5/thr_mul   time:   [2.7502 µs 2.7581 µs 2.7689 µs]
+                        change: [-0.3321% +0.2903% +0.9926%] (p = 0.31 > 0.05)
+                        No change in performance detected.
+Found 7 outliers among 100 measurements (7.00%)
+  4 (4.00%) high mild
+  3 (3.00%) high severe
+

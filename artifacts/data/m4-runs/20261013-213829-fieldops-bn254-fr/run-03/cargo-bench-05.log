@@ -1,0 +1,16 @@
+    Finished `bench` profile [optimized] target(s) in 0.06s
+     Running benches/field_ops.rs (target/release/deps/field_ops-87034789152b9eab)
+Gnuplot not found, using plotters backend
+Benchmarking BN254_Fr/lat_add
+Benchmarking BN254_Fr/lat_add: Warming up for 5.0000 s
+
+Warning: Unable to complete 100 samples in 10.0s. You may wish to increase target time to 14.4s, enable flat sampling, or reduce sample count to 50.
+Benchmarking BN254_Fr/lat_add: Collecting 100 samples in estimated 14.357 s (5050 iterations)
+Benchmarking BN254_Fr/lat_add: Analyzing
+BN254_Fr/lat_add        time:   [2.8584 ms 2.8947 ms 2.9420 ms]
+                        change: [-3.4062% -1.4916% +0.3000%] (p = 0.03 < 0.05)
+                        Change within noise threshold.
+Found 6 outliers among 100 measurements (6.00%)
+  4 (4.00%) high mild
+  2 (2.00%) high severe
+

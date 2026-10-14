@@ -1,0 +1,16 @@
+    Finished `bench` profile [optimized] target(s) in 0.08s
+     Running benches/binding.rs (target/release/deps/binding-069efa92eb800887)
+Gnuplot not found, using plotters backend
+Benchmarking BN254/chained_mul_upper_limb
+Benchmarking BN254/chained_mul_upper_limb: Warming up for 5.0000 s
+Benchmarking BN254/chained_mul_upper_limb: Collecting 100 samples in estimated 10.087 s (454k iterations)
+Benchmarking BN254/chained_mul_upper_limb: Analyzing
+BN254/chained_mul_upper_limb
+                        time:   [22.146 µs 22.177 µs 22.230 µs]
+                        change: [-0.2192% -0.0086% +0.2088%] (p = 0.92 > 0.05)
+                        No change in performance detected.
+Found 17 outliers among 100 measurements (17.00%)
+  1 (1.00%) low mild
+  3 (3.00%) high mild
+  13 (13.00%) high severe
+

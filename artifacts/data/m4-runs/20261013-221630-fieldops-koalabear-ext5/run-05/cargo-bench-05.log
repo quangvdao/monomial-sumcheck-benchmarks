@@ -1,0 +1,14 @@
+    Finished `bench` profile [optimized] target(s) in 0.06s
+     Running benches/field_ops.rs (target/release/deps/field_ops-87034789152b9eab)
+Gnuplot not found, using plotters backend
+Benchmarking KoalaBear_Ext5/lat_mul
+Benchmarking KoalaBear_Ext5/lat_mul: Warming up for 5.0000 s
+Benchmarking KoalaBear_Ext5/lat_mul: Collecting 100 samples in estimated 10.231 s (1300 iterations)
+Benchmarking KoalaBear_Ext5/lat_mul: Analyzing
+KoalaBear_Ext5/lat_mul  time:   [7.8505 ms 7.8655 ms 7.8830 ms]
+                        change: [-0.3773% -0.1069% +0.2001%] (p = 0.33 > 0.05)
+                        No change in performance detected.
+Found 4 outliers among 100 measurements (4.00%)
+  3 (3.00%) high mild
+  1 (1.00%) high severe
+

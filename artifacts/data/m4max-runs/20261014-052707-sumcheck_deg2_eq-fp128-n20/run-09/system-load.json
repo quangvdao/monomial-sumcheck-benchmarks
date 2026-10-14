@@ -1,0 +1,170 @@
+[
+  {
+    "case_index": 1,
+    "command": [
+      "cargo",
+      "bench",
+      "--bench",
+      "sumcheck",
+      "--",
+      "^sumcheck_deg2_eq/Fp128/delayed/20$",
+      "--noplot"
+    ],
+    "before": {
+      "captured_at_utc": "2026-10-14T04:57:11.910374+00:00",
+      "load_average_1m": 2.0908203125,
+      "load_average_5m": 2.56298828125,
+      "load_average_15m": 3.14404296875,
+      "logical_cpus": 16,
+      "load_1m_per_logical_cpu": 0.13067626953125
+    },
+    "after": {
+      "captured_at_utc": "2026-10-14T04:57:49.085198+00:00",
+      "load_average_1m": 2.38623046875,
+      "load_average_5m": 2.5830078125,
+      "load_average_15m": 3.1240234375,
+      "logical_cpus": 16,
+      "load_1m_per_logical_cpu": 0.149139404296875
+    }
+  },
+  {
+    "case_index": 2,
+    "command": [
+      "cargo",
+      "bench",
+      "--bench",
+      "sumcheck",
+      "--",
+      "^sumcheck_deg2_eq/Fp128/proj_delayed/20$",
+      "--noplot"
+    ],
+    "before": {
+      "captured_at_utc": "2026-10-14T04:57:49.100542+00:00",
+      "load_average_1m": 2.38623046875,
+      "load_average_5m": 2.5830078125,
+      "load_average_15m": 3.1240234375,
+      "logical_cpus": 16,
+      "load_1m_per_logical_cpu": 0.149139404296875
+    },
+    "after": {
+      "captured_at_utc": "2026-10-14T04:58:24.856894+00:00",
+      "load_average_1m": 2.75341796875,
+      "load_average_5m": 2.65673828125,
+      "load_average_15m": 3.12890625,
+      "logical_cpus": 16,
+      "load_1m_per_logical_cpu": 0.172088623046875
+    }
+  },
+  {
+    "case_index": 3,
+    "command": [
+      "cargo",
+      "bench",
+      "--bench",
+      "sumcheck",
+      "--",
+      "^sumcheck_deg2_eq/Fp128/projective_1inf/20$",
+      "--noplot"
+    ],
+    "before": {
+      "captured_at_utc": "2026-10-14T04:58:24.871939+00:00",
+      "load_average_1m": 2.75341796875,
+      "load_average_5m": 2.65673828125,
+      "load_average_15m": 3.12890625,
+      "logical_cpus": 16,
+      "load_1m_per_logical_cpu": 0.172088623046875
+    },
+    "after": {
+      "captured_at_utc": "2026-10-14T04:59:03.075381+00:00",
+      "load_average_1m": 3.24658203125,
+      "load_average_5m": 2.80517578125,
+      "load_average_15m": 3.16162109375,
+      "logical_cpus": 16,
+      "load_1m_per_logical_cpu": 0.202911376953125
+    }
+  },
+  {
+    "case_index": 4,
+    "command": [
+      "cargo",
+      "bench",
+      "--bench",
+      "sumcheck",
+      "--",
+      "^sumcheck_deg2_eq/Fp128/projective_1inf_delayed/20$",
+      "--noplot"
+    ],
+    "before": {
+      "captured_at_utc": "2026-10-14T04:59:03.090413+00:00",
+      "load_average_1m": 3.24658203125,
+      "load_average_5m": 2.80517578125,
+      "load_average_15m": 3.16162109375,
+      "logical_cpus": 16,
+      "load_1m_per_logical_cpu": 0.202911376953125
+    },
+    "after": {
+      "captured_at_utc": "2026-10-14T04:59:38.455056+00:00",
+      "load_average_1m": 2.55615234375,
+      "load_average_5m": 2.6943359375,
+      "load_average_15m": 3.107421875,
+      "logical_cpus": 16,
+      "load_1m_per_logical_cpu": 0.159759521484375
+    }
+  },
+  {
+    "case_index": 5,
+    "command": [
+      "cargo",
+      "bench",
+      "--bench",
+      "sumcheck",
+      "--",
+      "^sumcheck_deg2_eq/Fp128/boolean/20$",
+      "--noplot"
+    ],
+    "before": {
+      "captured_at_utc": "2026-10-14T04:59:38.469843+00:00",
+      "load_average_1m": 2.55615234375,
+      "load_average_5m": 2.6943359375,
+      "load_average_15m": 3.107421875,
+      "logical_cpus": 16,
+      "load_1m_per_logical_cpu": 0.159759521484375
+    },
+    "after": {
+      "captured_at_utc": "2026-10-14T05:00:17.401158+00:00",
+      "load_average_1m": 3.07275390625,
+      "load_average_5m": 2.78466796875,
+      "load_average_15m": 3.1181640625,
+      "logical_cpus": 16,
+      "load_1m_per_logical_cpu": 0.192047119140625
+    }
+  },
+  {
+    "case_index": 6,
+    "command": [
+      "cargo",
+      "bench",
+      "--bench",
+      "sumcheck",
+      "--",
+      "^sumcheck_deg2_eq/Fp128/projective/20$",
+      "--noplot"
+    ],
+    "before": {
+      "captured_at_utc": "2026-10-14T05:00:17.415769+00:00",
+      "load_average_1m": 3.07275390625,
+      "load_average_5m": 2.78466796875,
+      "load_average_15m": 3.1181640625,
+      "logical_cpus": 16,
+      "load_1m_per_logical_cpu": 0.192047119140625
+    },
+    "after": {
+      "captured_at_utc": "2026-10-14T05:00:56.125598+00:00",
+      "load_average_1m": 3.05224609375,
+      "load_average_5m": 2.794921875,
+      "load_average_15m": 3.10546875,
+      "logical_cpus": 16,
+      "load_1m_per_logical_cpu": 0.190765380859375
+    }
+  }
+]

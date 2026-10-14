@@ -1,0 +1,17 @@
+    Finished `bench` profile [optimized] target(s) in 0.10s
+     Running benches/lookup_tables.rs (target/release/deps/lookup_tables-1d5caa59e9b0188d)
+Gnuplot not found, using plotters backend
+Benchmarking lt_table_build/BB4_boolean/20
+Benchmarking lt_table_build/BB4_boolean/20: Warming up for 5.0000 s
+
+Warning: Unable to complete 100 samples in 10.0s. You may wish to increase target time to 15.1s, enable flat sampling, or reduce sample count to 50.
+Benchmarking lt_table_build/BB4_boolean/20: Collecting 100 samples in estimated 15.142 s (5050 iterations)
+Benchmarking lt_table_build/BB4_boolean/20: Analyzing
+lt_table_build/BB4_boolean/20
+                        time:   [2.9855 ms 2.9938 ms 3.0037 ms]
+                        change: [-0.7440% -0.1922% +0.3217%] (p = 0.36 > 0.05)
+                        No change in performance detected.
+Found 10 outliers among 100 measurements (10.00%)
+  5 (5.00%) high mild
+  5 (5.00%) high severe
+

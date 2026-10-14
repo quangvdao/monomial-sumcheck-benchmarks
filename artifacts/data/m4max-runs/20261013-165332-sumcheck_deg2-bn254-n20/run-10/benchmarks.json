@@ -1,0 +1,10 @@
+[
+  "sumcheck_deg2_BN254/boolean/20",
+  "sumcheck_deg2_BN254/delayed/20",
+  "sumcheck_deg2_BN254/proj_delayed/20",
+  "sumcheck_deg2_BN254/projective/20",
+  "sumcheck_deg2_BN254_upper/boolean/20",
+  "sumcheck_deg2_BN254_upper/delayed/20",
+  "sumcheck_deg2_BN254_upper/proj_delayed/20",
+  "sumcheck_deg2_BN254_upper/projective/20"
+]

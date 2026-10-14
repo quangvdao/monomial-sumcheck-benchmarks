@@ -130,11 +130,11 @@ summary. Do not transcribe table entries manually.
 `scripts/paper_tables.py` writes every table body and every number quoted in
 the paper (`tab_*.tex` and `numbers.tex`) from a list of run directories:
 
-    cd DATA_SET
-    python3 REPO/scripts/paper_tables.py --out OUT_DIR \
-      $(grep -v '^#' REPO/docs/paper-runs.txt)
+    cd artifacts/data
+    python3 ../../scripts/paper_tables.py --out OUT_DIR \
+      $(grep -v '^#' ../../docs/paper-runs.txt)
 
-where DATA_SET holds the `m4-runs` and `m4max-runs` directories. If two directories contain the same case, the later one is used, and a
+where `artifacts/data` holds the `m4-runs` and `m4max-runs` directories. If two directories contain the same case, the later one is used, and a
 speedup is computed only from two cases of the same run directory. The
 uncertainty table uses the same paired ratios as `summarize.py`.
 

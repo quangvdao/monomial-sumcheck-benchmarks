@@ -1,0 +1,15 @@
+    Finished `bench` profile [optimized] target(s) in 0.07s
+     Running benches/binding.rs (target/release/deps/binding-069efa92eb800887)
+Gnuplot not found, using plotters backend
+Benchmarking BN254/combined_boolean_upper
+Benchmarking BN254/combined_boolean_upper: Warming up for 5.0000 s
+Benchmarking BN254/combined_boolean_upper: Collecting 100 samples in estimated 10.203 s (800 iterations)
+Benchmarking BN254/combined_boolean_upper: Analyzing
+BN254/combined_boolean_upper
+                        time:   [11.230 ms 11.257 ms 11.295 ms]
+                        change: [-1.8165% -0.4656% +0.3053%] (p = 0.31 > 0.05)
+                        No change in performance detected.
+Found 3 outliers among 100 measurements (3.00%)
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+

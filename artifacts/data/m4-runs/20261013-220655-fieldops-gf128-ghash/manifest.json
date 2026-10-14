@@ -1,0 +1,109 @@
+{
+  "schema": 3,
+  "created_at_utc": "2026-10-13T21:06:55.909263+00:00",
+  "collector_argv": [
+    "scripts/collect.py",
+    "--suite",
+    "field_ops",
+    "--repetitions",
+    "5",
+    "--label",
+    "fieldops-gf128-ghash",
+    "--max-load-per-cpu",
+    "0.6",
+    "--case",
+    "GF128_Ghash/lat_add",
+    "--case",
+    "GF128_Ghash/lat_sub",
+    "--case",
+    "GF128_Ghash/lat_mul",
+    "--case",
+    "GF128_Ghash/thr_add",
+    "--case",
+    "GF128_Ghash/thr_sub",
+    "--case",
+    "GF128_Ghash/thr_mul"
+  ],
+  "commands": [
+    [
+      "cargo",
+      "bench",
+      "--bench",
+      "field_ops",
+      "--",
+      "^GF128_Ghash/lat_add$",
+      "--noplot"
+    ],
+    [
+      "cargo",
+      "bench",
+      "--bench",
+      "field_ops",
+      "--",
+      "^GF128_Ghash/lat_sub$",
+      "--noplot"
+    ],
+    [
+      "cargo",
+      "bench",
+      "--bench",
+      "field_ops",
+      "--",
+      "^GF128_Ghash/lat_mul$",
+      "--noplot"
+    ],
+    [
+      "cargo",
+      "bench",
+      "--bench",
+      "field_ops",
+      "--",
+      "^GF128_Ghash/thr_add$",
+      "--noplot"
+    ],
+    [
+      "cargo",
+      "bench",
+      "--bench",
+      "field_ops",
+      "--",
+      "^GF128_Ghash/thr_sub$",
+      "--noplot"
+    ],
+    [
+      "cargo",
+      "bench",
+      "--bench",
+      "field_ops",
+      "--",
+      "^GF128_Ghash/thr_mul$",
+      "--noplot"
+    ]
+  ],
+  "repetitions": 5,
+  "pairing": "one fresh cargo process per case; cyclically balanced case order",
+  "max_load_per_cpu": 0.6,
+  "allow_busy": false,
+  "allow_dirty": false,
+  "initial_load": {
+    "captured_at_utc": "2026-10-13T21:06:55.906089+00:00",
+    "load_average_1m": 2.91552734375,
+    "load_average_5m": 2.85498046875,
+    "load_average_15m": 2.87158203125,
+    "logical_cpus": 10,
+    "load_1m_per_logical_cpu": 0.291552734375
+  },
+  "git_commit": "6d7f6c5a787ee50f70e7cb4c99efb355fd977102",
+  "git_status": "",
+  "git_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02)\nbinary: rustc\ncommit-hash: 4a4ef493e3a1488c6e321570238084b38948f6db\ncommit-date: 2026-03-02\nhost: aarch64-apple-darwin\nrelease: 1.94.0\nLLVM version: 21.1.8",
+  "cargo": "cargo 1.94.0 (85eff7c80 2026-01-15)",
+  "python": "3.14.0 (main, Oct  7 2025, 09:34:52) [Clang 17.0.0 (clang-1700.3.19.1)]",
+  "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "uname": "Darwin Quangs-MacBook-Air-161.local 27.0.0 Darwin Kernel Version 27.0.0: Tue Aug 11 21:02:57 PDT 2026; root:xnu-13432.1.9~1/RELEASE_ARM64_T8132 arm64",
+  "os_version": "ProductName:\t\tmacOS\nProductVersion:\t\t27.0.1\nBuildVersion:\t\t26A434",
+  "cpu": "Apple M4",
+  "cargo_target_dir": "target",
+  "rustflags": "",
+  "cargo_encoded_rustflags": ""
+}

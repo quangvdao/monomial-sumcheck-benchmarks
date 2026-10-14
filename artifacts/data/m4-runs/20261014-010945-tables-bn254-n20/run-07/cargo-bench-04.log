@@ -1,0 +1,15 @@
+    Finished `bench` profile [optimized] target(s) in 0.08s
+     Running benches/lookup_tables.rs (target/release/deps/lookup_tables-1d5caa59e9b0188d)
+Gnuplot not found, using plotters backend
+Benchmarking eq_table_build/BN254_projective/20
+Benchmarking eq_table_build/BN254_projective/20: Warming up for 5.0000 s
+Benchmarking eq_table_build/BN254_projective/20: Collecting 100 samples in estimated 10.802 s (1000 iterations)
+Benchmarking eq_table_build/BN254_projective/20: Analyzing
+eq_table_build/BN254_projective/20
+                        time:   [10.771 ms 10.797 ms 10.832 ms]
+                        change: [-0.2055% +0.1347% +0.4944%] (p = 0.34 > 0.05)
+                        No change in performance detected.
+Found 6 outliers among 100 measurements (6.00%)
+  3 (3.00%) high mild
+  3 (3.00%) high severe
+

@@ -1,0 +1,15 @@
+    Finished `bench` profile [optimized] target(s) in 0.07s
+     Running benches/binding.rs (target/release/deps/binding-069efa92eb800887)
+Gnuplot not found, using plotters backend
+Benchmarking BN254/combined_projective_bf
+Benchmarking BN254/combined_projective_bf: Warming up for 5.0000 s
+Benchmarking BN254/combined_projective_bf: Collecting 100 samples in estimated 10.889 s (900 iterations)
+Benchmarking BN254/combined_projective_bf: Analyzing
+BN254/combined_projective_bf
+                        time:   [10.610 ms 10.621 ms 10.634 ms]
+                        change: [-0.4016% -0.1244% +0.1044%] (p = 0.22 > 0.05)
+                        No change in performance detected.
+Found 19 outliers among 100 measurements (19.00%)
+  16 (16.00%) high mild
+  3 (3.00%) high severe
+

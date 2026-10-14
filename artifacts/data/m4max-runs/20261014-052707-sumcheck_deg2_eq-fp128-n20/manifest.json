@@ -1,0 +1,109 @@
+{
+  "schema": 3,
+  "created_at_utc": "2026-10-14T04:27:07.527674+00:00",
+  "collector_argv": [
+    "scripts/collect.py",
+    "--suite",
+    "sumcheck",
+    "--repetitions",
+    "10",
+    "--label",
+    "sumcheck_deg2_eq-fp128-n20",
+    "--max-load-per-cpu",
+    "0.4",
+    "--case",
+    "sumcheck_deg2_eq/Fp128/boolean/20",
+    "--case",
+    "sumcheck_deg2_eq/Fp128/projective/20",
+    "--case",
+    "sumcheck_deg2_eq/Fp128/delayed/20",
+    "--case",
+    "sumcheck_deg2_eq/Fp128/proj_delayed/20",
+    "--case",
+    "sumcheck_deg2_eq/Fp128/projective_1inf/20",
+    "--case",
+    "sumcheck_deg2_eq/Fp128/projective_1inf_delayed/20"
+  ],
+  "commands": [
+    [
+      "cargo",
+      "bench",
+      "--bench",
+      "sumcheck",
+      "--",
+      "^sumcheck_deg2_eq/Fp128/boolean/20$",
+      "--noplot"
+    ],
+    [
+      "cargo",
+      "bench",
+      "--bench",
+      "sumcheck",
+      "--",
+      "^sumcheck_deg2_eq/Fp128/projective/20$",
+      "--noplot"
+    ],
+    [
+      "cargo",
+      "bench",
+      "--bench",
+      "sumcheck",
+      "--",
+      "^sumcheck_deg2_eq/Fp128/delayed/20$",
+      "--noplot"
+    ],
+    [
+      "cargo",
+      "bench",
+      "--bench",
+      "sumcheck",
+      "--",
+      "^sumcheck_deg2_eq/Fp128/proj_delayed/20$",
+      "--noplot"
+    ],
+    [
+      "cargo",
+      "bench",
+      "--bench",
+      "sumcheck",
+      "--",
+      "^sumcheck_deg2_eq/Fp128/projective_1inf/20$",
+      "--noplot"
+    ],
+    [
+      "cargo",
+      "bench",
+      "--bench",
+      "sumcheck",
+      "--",
+      "^sumcheck_deg2_eq/Fp128/projective_1inf_delayed/20$",
+      "--noplot"
+    ]
+  ],
+  "repetitions": 10,
+  "pairing": "one fresh cargo process per case; cyclically balanced case order",
+  "max_load_per_cpu": 0.4,
+  "allow_busy": false,
+  "allow_dirty": false,
+  "initial_load": {
+    "captured_at_utc": "2026-10-14T04:27:07.524598+00:00",
+    "load_average_1m": 3.6484375,
+    "load_average_5m": 3.4443359375,
+    "load_average_15m": 5.8291015625,
+    "logical_cpus": 16,
+    "load_1m_per_logical_cpu": 0.22802734375
+  },
+  "git_commit": "77a25a524a938c20f8f3c138179e976127738c21",
+  "git_status": "",
+  "git_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02)\nbinary: rustc\ncommit-hash: 4a4ef493e3a1488c6e321570238084b38948f6db\ncommit-date: 2026-03-02\nhost: aarch64-apple-darwin\nrelease: 1.94.0\nLLVM version: 21.1.8",
+  "cargo": "cargo 1.94.0 (85eff7c80 2026-01-15)",
+  "python": "3.14.8 (main, Sep 30 2026, 17:55:09) [Clang 21.0.0 (clang-2100.3.34.2)]",
+  "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "uname": "Darwin Quangs-MacBook-Pro-2.local 27.0.0 Darwin Kernel Version 27.0.0: Tue Aug 11 21:05:48 PDT 2026; root:xnu-13432.1.9~1/RELEASE_ARM64_T6041 arm64",
+  "os_version": "ProductName:\t\tmacOS\nProductVersion:\t\t27.0.1\nBuildVersion:\t\t26A434",
+  "cpu": "Apple M4 Max",
+  "cargo_target_dir": "target",
+  "rustflags": "",
+  "cargo_encoded_rustflags": ""
+}

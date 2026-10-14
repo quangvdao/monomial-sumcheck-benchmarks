@@ -1,0 +1,16 @@
+    Finished `bench` profile [optimized] target(s) in 0.05s
+     Running benches/sumcheck.rs (target/release/deps/sumcheck-ce12e4ced68fe06e)
+Gnuplot not found, using plotters backend
+Benchmarking sumcheck_deg2/BN254/proj_delayed/20
+Benchmarking sumcheck_deg2/BN254/proj_delayed/20: Warming up for 5.0000 s
+Benchmarking sumcheck_deg2/BN254/proj_delayed/20: Collecting 100 samples in estimated 10.379 s (200 iterations)
+Benchmarking sumcheck_deg2/BN254/proj_delayed/20: Analyzing
+sumcheck_deg2/BN254/proj_delayed/20
+                        time:   [50.770 ms 50.822 ms 50.878 ms]
+                        change: [+0.1537% +0.3185% +0.4815%] (p = 0.00 < 0.05)
+                        Change within noise threshold.
+Found 3 outliers among 100 measurements (3.00%)
+  1 (1.00%) low mild
+  1 (1.00%) high mild
+  1 (1.00%) high severe
+

@@ -1,0 +1,87 @@
+{
+  "schema": 3,
+  "created_at_utc": "2026-10-14T03:37:47.391247+00:00",
+  "collector_argv": [
+    "scripts/collect.py",
+    "--suite",
+    "sumcheck",
+    "--repetitions",
+    "5",
+    "--label",
+    "sumcheck_deg2-bb5-n20",
+    "--max-load-per-cpu",
+    "0.6",
+    "--case",
+    "sumcheck_deg2/BB5/boolean/20",
+    "--case",
+    "sumcheck_deg2/BB5/projective/20",
+    "--case",
+    "sumcheck_deg2/BB5/delayed/20",
+    "--case",
+    "sumcheck_deg2/BB5/proj_delayed/20"
+  ],
+  "commands": [
+    [
+      "cargo",
+      "bench",
+      "--bench",
+      "sumcheck",
+      "--",
+      "^sumcheck_deg2/BB5/boolean/20$",
+      "--noplot"
+    ],
+    [
+      "cargo",
+      "bench",
+      "--bench",
+      "sumcheck",
+      "--",
+      "^sumcheck_deg2/BB5/projective/20$",
+      "--noplot"
+    ],
+    [
+      "cargo",
+      "bench",
+      "--bench",
+      "sumcheck",
+      "--",
+      "^sumcheck_deg2/BB5/delayed/20$",
+      "--noplot"
+    ],
+    [
+      "cargo",
+      "bench",
+      "--bench",
+      "sumcheck",
+      "--",
+      "^sumcheck_deg2/BB5/proj_delayed/20$",
+      "--noplot"
+    ]
+  ],
+  "repetitions": 5,
+  "pairing": "one fresh cargo process per case; cyclically balanced case order",
+  "max_load_per_cpu": 0.6,
+  "allow_busy": false,
+  "allow_dirty": false,
+  "initial_load": {
+    "captured_at_utc": "2026-10-14T03:37:47.388251+00:00",
+    "load_average_1m": 2.48779296875,
+    "load_average_5m": 2.66650390625,
+    "load_average_15m": 2.60302734375,
+    "logical_cpus": 10,
+    "load_1m_per_logical_cpu": 0.248779296875
+  },
+  "git_commit": "77a25a524a938c20f8f3c138179e976127738c21",
+  "git_status": "",
+  "git_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02)\nbinary: rustc\ncommit-hash: 4a4ef493e3a1488c6e321570238084b38948f6db\ncommit-date: 2026-03-02\nhost: aarch64-apple-darwin\nrelease: 1.94.0\nLLVM version: 21.1.8",
+  "cargo": "cargo 1.94.0 (85eff7c80 2026-01-15)",
+  "python": "3.14.0 (main, Oct  7 2025, 09:34:52) [Clang 17.0.0 (clang-1700.3.19.1)]",
+  "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "uname": "Darwin Quangs-MacBook-Air-161.local 27.0.0 Darwin Kernel Version 27.0.0: Tue Aug 11 21:02:57 PDT 2026; root:xnu-13432.1.9~1/RELEASE_ARM64_T8132 arm64",
+  "os_version": "ProductName:\t\tmacOS\nProductVersion:\t\t27.0.1\nBuildVersion:\t\t26A434",
+  "cpu": "Apple M4",
+  "cargo_target_dir": "target",
+  "rustflags": "",
+  "cargo_encoded_rustflags": ""
+}

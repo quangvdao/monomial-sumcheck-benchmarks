@@ -1,0 +1,14 @@
+    Finished `bench` profile [optimized] target(s) in 0.06s
+     Running benches/field_ops.rs (target/release/deps/field_ops-87034789152b9eab)
+Gnuplot not found, using plotters backend
+Benchmarking BN254_Fr/lat_mul
+Benchmarking BN254_Fr/lat_mul: Warming up for 5.0000 s
+Benchmarking BN254_Fr/lat_mul: Collecting 100 samples in estimated 10.689 s (800 iterations)
+Benchmarking BN254_Fr/lat_mul: Analyzing
+BN254_Fr/lat_mul        time:   [13.303 ms 13.337 ms 13.382 ms]
+                        change: [-0.1883% +0.2294% +0.6164%] (p = 0.15 > 0.05)
+                        No change in performance detected.
+Found 5 outliers among 100 measurements (5.00%)
+  2 (2.00%) high mild
+  3 (3.00%) high severe
+

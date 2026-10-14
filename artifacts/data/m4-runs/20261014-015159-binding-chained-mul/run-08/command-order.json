@@ -1,0 +1,20 @@
+[
+  [
+    "cargo",
+    "bench",
+    "--bench",
+    "binding",
+    "--",
+    "^BN254/chained_mul_upper_limb$",
+    "--noplot"
+  ],
+  [
+    "cargo",
+    "bench",
+    "--bench",
+    "binding",
+    "--",
+    "^BN254/chained_mul_standard$",
+    "--noplot"
+  ]
+]

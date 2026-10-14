@@ -1,0 +1,6 @@
+[
+  "eq_table_build/BN254_boolean/20",
+  "eq_table_build/BN254_projective/20",
+  "lt_table_build/BN254_boolean/20",
+  "lt_table_build/BN254_projective/20"
+]

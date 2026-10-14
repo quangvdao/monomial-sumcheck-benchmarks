@@ -1,0 +1,17 @@
+    Finished `bench` profile [optimized] target(s) in 0.05s
+     Running benches/field_ops.rs (target/release/deps/field_ops-87034789152b9eab)
+Gnuplot not found, using plotters backend
+Benchmarking GF128_Ghash/lat_mul
+Benchmarking GF128_Ghash/lat_mul: Warming up for 5.0000 s
+
+Warning: Unable to complete 100 samples in 10.0s. You may wish to increase target time to 17.4s, enable flat sampling, or reduce sample count to 50.
+Benchmarking GF128_Ghash/lat_mul: Collecting 100 samples in estimated 17.405 s (5050 iterations)
+Benchmarking GF128_Ghash/lat_mul: Analyzing
+GF128_Ghash/lat_mul     time:   [3.4217 ms 3.4296 ms 3.4381 ms]
+                        change: [-1.0547% -0.7050% -0.3452%] (p = 0.00 < 0.05)
+                        Change within noise threshold.
+Found 6 outliers among 100 measurements (6.00%)
+  3 (3.00%) low mild
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+

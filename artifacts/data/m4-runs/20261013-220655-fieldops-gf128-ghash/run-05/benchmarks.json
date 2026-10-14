@@ -1,0 +1,8 @@
+[
+  "GF128_Ghash_lat_add",
+  "GF128_Ghash_lat_mul",
+  "GF128_Ghash_lat_sub",
+  "GF128_Ghash_thr_add",
+  "GF128_Ghash_thr_mul",
+  "GF128_Ghash_thr_sub"
+]
